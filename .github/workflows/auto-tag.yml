@@ -1,0 +1,105 @@
+name: Auto Tag
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "README.md"
+      - "docs/**"
+      - ".github/**"
+
+jobs:
+  tag:
+    name: Create tag
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip-tag]')"
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get latest tag
+        id: latest_tag
+        run: |
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "Latest tag: $LATEST_TAG"
+
+      - name: Determine next version
+        id: next_version
+        run: |
+          LATEST_TAG="${{ steps.latest_tag.outputs.latest_tag }}"
+
+          # Extraire les numéros de version
+          if [[ $LATEST_TAG =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            MAJOR=${BASH_REMATCH[1]}
+            MINOR=${BASH_REMATCH[2]}
+            PATCH=${BASH_REMATCH[3]}
+          else
+            MAJOR=0
+            MINOR=0
+            PATCH=0
+          fi
+
+          # Analyser le message de commit pour déterminer le type de version
+          COMMIT_MSG="${{ github.event.head_commit.message }}"
+
+          if [[ $COMMIT_MSG =~ \[major\] ]] || [[ $COMMIT_MSG =~ BREAKING.CHANGE ]]; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+            PATCH=0
+            VERSION_TYPE="major"
+          elif [[ $COMMIT_MSG =~ \[minor\] ]] || [[ $COMMIT_MSG =~ ^feat ]]; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+            VERSION_TYPE="minor"
+          else
+            PATCH=$((PATCH + 1))
+            VERSION_TYPE="patch"
+          fi
+
+          NEXT_VERSION="v${MAJOR}.${MINOR}.${PATCH}"
+          echo "next_version=$NEXT_VERSION" >> $GITHUB_OUTPUT
+          echo "version_type=$VERSION_TYPE" >> $GITHUB_OUTPUT
+          echo "Next version: $NEXT_VERSION (type: $VERSION_TYPE)"
+
+      - name: Create tag
+        if: steps.next_version.outputs.next_version != steps.latest_tag.outputs.latest_tag
+        run: |
+          NEXT_VERSION="${{ steps.next_version.outputs.next_version }}"
+          VERSION_TYPE="${{ steps.next_version.outputs.version_type }}"
+
+          # Créer le tag avec un message descriptif
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          TAG_MESSAGE="Release $NEXT_VERSION ($VERSION_TYPE)
+
+          Changes in this release:
+          ${{ github.event.head_commit.message }}
+
+          Auto-generated tag from commit: ${{ github.sha }}"
+
+          git tag -a "$NEXT_VERSION" -m "$TAG_MESSAGE"
+          git push origin "$NEXT_VERSION"
+
+          echo "Created and pushed tag: $NEXT_VERSION"
+
+      - name: Create pre-release for development
+        if: github.ref == 'refs/heads/develop'
+        run: |
+          DEV_VERSION="v0.0.0-dev-${GITHUB_SHA::8}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git tag -a "$DEV_VERSION" -m "Development build $DEV_VERSION"
+          git push origin "$DEV_VERSION"
+
+          echo "Created development tag: $DEV_VERSION"
+

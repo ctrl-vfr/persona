@@ -1,0 +1,9 @@
+models:
+  transcription: gpt-4o-mini-transcribe
+  speech: gpt-4o-mini-tts
+  chat: gpt-4o-mini
+audio:
+  input_device: ""
+  output_device: ""
+  silence_threshold: -50
+  silence_duration: 2

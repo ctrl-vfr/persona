@@ -1,0 +1,196 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24.0'
+        check-latest: true
+        
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libasound2-dev pkg-config
+
+    - name: Get dependencies
+      env:
+        GOPROXY: "direct"
+      run: |
+        go mod download
+        go mod verify
+        
+    - name: Initialize module cache
+      env:
+        GOPROXY: "direct"
+      run: go list -m
+      
+    - name: Debug module info
+      env:
+        GOPROXY: "direct"
+      run: |
+        echo "=== Go environment ==="
+        go env GOMOD GOPATH GOPROXY
+        echo "=== Current directory structure ==="
+        pwd
+        ls -la
+        echo "=== Internal directory ==="
+        ls -la internal/ || echo "internal directory not found"
+        echo "=== Module info ==="
+        go list -m
+        echo "=== Testing individual packages ==="
+        echo "Trying to build internal/persona..."
+        go build ./internal/persona
+        echo "Trying to build internal/ui..."
+        go build ./internal/ui
+        echo "=== All packages ==="
+        go list ./...
+        echo "=== Module graph ==="
+        go mod graph
+
+    - name: Run vet
+      env:
+        GOFLAGS: "-mod=mod"
+        GOPROXY: "direct"
+      run: go vet ./...
+
+    - name: Run tests with coverage
+      env:
+        GOFLAGS: "-mod=mod"
+        GOPROXY: "direct"
+      run: make test-cover
+
+    - name: Check coverage threshold
+      run: make coverage-check
+
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.out
+        flags: unittests
+        name: codecov-umbrella
+
+  build-dev:
+    name: Build development binaries
+    needs: test
+    
+    strategy:
+      matrix:
+        include:
+          - os: windows
+            runner: windows-latest
+            goos: windows
+            goarch: amd64
+            ext: .exe
+            deps: ""
+          - os: linux
+            runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ext: ""
+            deps: "sudo apt-get update && sudo apt-get install -y gcc g++ libasound2-dev pkg-config"
+          - os: darwin
+            runner: macos-latest
+            goos: darwin
+            goarch: amd64
+            ext: ""
+            deps: ""
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24.0'
+        check-latest: true
+
+    - name: Install build dependencies
+      if: matrix.deps != ''
+      shell: bash
+      run: ${{ matrix.deps }}
+
+    - name: Get dependencies
+      run: go mod download
+
+    - name: Build binary
+      env:
+        CGO_ENABLED: 1
+      shell: bash
+      run: |
+        VERSION="dev-${GITHUB_SHA::8}"
+        BINARY_NAME="persona-$VERSION-${{ matrix.os }}-${{ matrix.goarch }}${{ matrix.ext }}"
+        BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+        GIT_COMMIT=${GITHUB_SHA::8}
+        GIT_BRANCH=${GITHUB_REF##*/}
+        
+        echo "Building development binary: $BINARY_NAME"
+        go build -a -installsuffix cgo \
+          -ldflags="-w -s \
+            -X 'github.com/ctrl-vfr/persona/cmd.version=$VERSION' \
+            -X 'github.com/ctrl-vfr/persona/cmd.buildTime=$BUILD_TIME' \
+            -X 'github.com/ctrl-vfr/persona/cmd.gitCommit=$GIT_COMMIT' \
+            -X 'github.com/ctrl-vfr/persona/cmd.gitBranch=$GIT_BRANCH'" \
+          -o "$BINARY_NAME" \
+          .
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: persona-dev-${{ matrix.os }}-${{ matrix.goarch }}
+        path: persona-*-${{ matrix.os }}-${{ matrix.goarch }}${{ matrix.ext }}
+        retention-days: 7  # Garde les artefacts de dev seulement 7 jours
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24.0'
+        check-latest: true
+        
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libasound2-dev pkg-config
+
+    - name: Get dependencies
+      env:
+        GOPROXY: "direct"
+      run: go mod download
+      
+    - name: Initialize module cache
+      env:
+        GOPROXY: "direct"
+      run: go list -m
+
+    - name: Run golangci-lint
+      env:
+        GOFLAGS: "-mod=mod"
+        GOPROXY: "direct"
+      uses: golangci/golangci-lint-action@v3
+      continue-on-error: true
+      with:
+        version: latest
+        args: --timeout=5m

@@ -1,0 +1,21 @@
+*.exe
+*.exe~
+scripts/*
+.crush/
+CLAUDE.md
+# Binaries
+*.exe
+# Coverage files
+coverage.out
+coverage.html
+# Test docs
+TEST_RESULTS.md
+# Vendor directory
+vendor/
+# IDE settings
+.vscode/
+.idea/
+# Swap files
+*.swp
+# Logs
+*.log

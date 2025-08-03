@@ -1,0 +1,66 @@
+run:
+  timeout: 5m
+  go: '1.23'
+
+linters-settings:
+  govet:
+    check-shadowing: false
+  lll:
+    line-length: 200
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+  mnd:
+    ignored-numbers: 0,1,2,3,4,5,6,7,8,9,10,30,50,80,100
+  gosec:
+    confidence: medium
+    severity: medium
+
+linters:
+  enable:
+    - errcheck
+    - gofmt
+    - goimports  
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - typecheck
+    - unused
+  disable:
+    - depguard
+    - exhaustive
+    - goconst
+    - gocritic
+    - gosec
+    - lll
+    - misspell
+    - mnd
+    - noctx
+    - revive
+    - unconvert
+    - unparam
+    - whitespace
+    - copyloopvar
+issues:
+  exclude-dirs:
+    - internal/speak
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - mnd
+        - goconst
+        - gosec
+    - linters:
+        - lll
+      source: "^//go:generate "
+    - path: internal/speak/
+      linters:
+        - typecheck
+        - unused
+  exclude-use-default: false
+  exclude:
+    - "should have a package comment"
+    - "should have comment or be unexported"
+  max-issues-per-linter: 0
+  max-same-issues: 0

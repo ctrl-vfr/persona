@@ -1,0 +1,84 @@
+name: Cleanup Artifacts
+
+on:
+  schedule:
+    - cron: '0 2 * * 0'  # Tous les dimanches à 2h du matin
+  workflow_dispatch:     # Permet de déclencher manuellement
+
+jobs:
+  cleanup:
+    name: Cleanup old artifacts
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    
+    steps:
+    - name: Cleanup artifacts
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const owner = context.repo.owner;
+          const repo = context.repo.repo;
+          
+          // Obtenir tous les artefacts
+          const artifacts = await github.rest.actions.listArtifactsForRepo({
+            owner: owner,
+            repo: repo,
+            per_page: 100
+          });
+          
+          const now = new Date();
+          const oneWeekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          
+          let deletedCount = 0;
+          
+          for (const artifact of artifacts.data.artifacts) {
+            const createdAt = new Date(artifact.created_at);
+            
+            // Supprimer les artefacts de dev plus anciens qu'une semaine
+            if (artifact.name.includes('-dev-') && createdAt < oneWeekAgo) {
+              console.log(`Deleting dev artifact: ${artifact.name} (created: ${artifact.created_at})`);
+              await github.rest.actions.deleteArtifact({
+                owner: owner,
+                repo: repo,
+                artifact_id: artifact.id
+              });
+              deletedCount++;
+            }
+            
+            // Supprimer les artefacts très anciens (plus de 30 jours)
+            const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+            if (createdAt < thirtyDaysAgo) {
+              console.log(`Deleting old artifact: ${artifact.name} (created: ${artifact.created_at})`);
+              await github.rest.actions.deleteArtifact({
+                owner: owner,
+                repo: repo,
+                artifact_id: artifact.id
+              });
+              deletedCount++;
+            }
+          }
+          
+          console.log(`Deleted ${deletedCount} artifacts`);
+          
+          // Optionnel: Nettoyer aussi les anciennes releases de pre-release
+          const releases = await github.rest.repos.listReleases({
+            owner: owner,
+            repo: repo,
+            per_page: 100
+          });
+          
+          for (const release of releases.data) {
+            if (release.prerelease && release.tag_name.includes('dev')) {
+              const releaseDate = new Date(release.created_at);
+              if (releaseDate < oneWeekAgo) {
+                console.log(`Deleting old pre-release: ${release.tag_name}`);
+                await github.rest.repos.deleteRelease({
+                  owner: owner,
+                  repo: repo,
+                  release_id: release.id
+                });
+              }
+            }
+          }
