@@ -22,8 +22,6 @@ var ffmpegListCmd = &cobra.Command{
 	Long:  "List available audio devices",
 }
 
-// Global output format variables are defined in version.go
-
 var ffmpegListInputCmd = &cobra.Command{
 	Use:   "input",
 	Short: "List audio input devices",

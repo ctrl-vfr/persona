@@ -23,7 +23,6 @@ var (
 )
 
 // VersionInfo contains version and build information
-// ...
 type VersionInfo struct {
 	Version   string `json:"version"`
 	BuildTime string `json:"build_time"`

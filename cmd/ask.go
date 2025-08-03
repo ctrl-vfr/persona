@@ -8,7 +8,6 @@ import (
 
 	"github.com/ctrl-vfr/persona/internal/ffmpeg"
 	"github.com/ctrl-vfr/persona/internal/openai"
-	"github.com/ctrl-vfr/persona/internal/output"
 	"github.com/ctrl-vfr/persona/internal/persona"
 	"github.com/ctrl-vfr/persona/internal/speak"
 	"github.com/ctrl-vfr/persona/internal/ui"
@@ -22,12 +21,11 @@ var (
 
 var askCmd = &cobra.Command{
 	Use:   "ask [nom]",
-	Short: "Simple discussion with a persona (legacy mode)",
+	Short: "Simple discussion with a persona (non-interactive)",
 	Long:  "Simple discussion mode, one question-answer at a time. Use 'persona chat' for interactive interface.",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		personaName := args[0]
-		formatter := output.New(output.ParseFormat(askOutputFormat))
 
 		if askOutputFormat == "default" {
 			terminalWidth := ui.GetTerminalWidth()
@@ -36,19 +34,16 @@ var askCmd = &cobra.Command{
 
 		currentPersona, err := storageManager.GetPersona(personaName)
 		if err != nil {
-			formatter.Error(fmt.Sprintf("Error loading persona: %v", err))
-			return
+			log.Fatal("Error loading persona:", err)
 		}
 
 		appConfig, err := storageManager.GetConfig()
 		if err != nil {
-			formatter.Error(fmt.Sprintf("Error loading configuration: %v", err))
-			return
+			log.Fatal("Error loading configuration:", err)
 		}
 
 		if appConfig.Audio.InputDevice == "" {
-			formatter.Error("Audio input device not configured. Use 'persona config set-input-device <device>'.")
-			return
+			log.Fatal("Audio input device not configured. Use 'persona config set-input-device <device>'.")
 		}
 
 		aiClient := openai.New(os.Getenv("OPENAI_API_KEY"), appConfig.Models.Transcription, appConfig.Models.Speech, appConfig.Models.Chat, currentPersona.Voice.Name)
@@ -60,14 +55,12 @@ var askCmd = &cobra.Command{
 		recorder := ffmpeg.New(appConfig.Audio.InputDevice, appConfig.Audio.SilenceThreshold, appConfig.Audio.SilenceDuration)
 		tempAudioFile, err := recorder.Record()
 		if err != nil {
-			formatter.Error(fmt.Sprintf("Audio recording error: %v", err))
-			return
+			log.Fatal("Audio recording error:", err)
 		}
 
 		audioDataToTranscribe, err := os.Open(tempAudioFile)
 		if err != nil {
-			formatter.Error(fmt.Sprintf("Error opening temporary file: %v", err))
-			return
+			log.Fatal("Error opening temporary file:", err)
 		}
 		defer os.Remove(tempAudioFile)
 		defer audioDataToTranscribe.Close()
@@ -77,8 +70,7 @@ var askCmd = &cobra.Command{
 		}
 		transcription, err := aiClient.Transcribe(audioDataToTranscribe)
 		if err != nil {
-			formatter.Error(fmt.Sprintf("Transcription error: %v", err))
-			return
+			log.Fatal("Transcription error:", err)
 		}
 
 		if askOutputFormat == "default" {
@@ -105,8 +97,7 @@ var askCmd = &cobra.Command{
 		}
 		aiResponse, err := aiClient.Chat(aiMessages)
 		if err != nil {
-			formatter.Error(fmt.Sprintf("AI chat error: %v", err))
-			return
+			log.Fatal("AI chat error:", err)
 		}
 
 		if askOutputFormat == "default" {
@@ -129,27 +120,23 @@ var askCmd = &cobra.Command{
 		}
 		audioResponseData, err := aiClient.GenerateAudio(aiResponse, currentPersona.Voice.Instructions)
 		if err != nil {
-			formatter.Error(fmt.Sprintf("Audio generation error: %v", err))
-			return
+			log.Fatal("Audio generation error:", err)
 		}
 
 		audioBytes, err := io.ReadAll(audioResponseData)
 		if err != nil {
-			formatter.Error(fmt.Sprintf("Audio data read error: %v", err))
-			return
+			log.Fatal("Audio data read error:", err)
 		}
 
 		tempAudioResponseFile, err := os.CreateTemp("", "persona-response-*.mp3")
 		if err != nil {
-			formatter.Error(fmt.Sprintf("Temporary audio file creation error: %v", err))
-			return
+			log.Fatal("Temporary audio file creation error:", err)
 		}
 		defer os.Remove(tempAudioResponseFile.Name())
 
 		err = os.WriteFile(tempAudioResponseFile.Name(), audioBytes, 0o644)
 		if err != nil {
-			formatter.Error(fmt.Sprintf("Audio file write error: %v", err))
-			return
+			log.Fatal("Audio file write error:", err)
 		}
 
 		if askOutputFormat == "default" {
@@ -157,8 +144,7 @@ var askCmd = &cobra.Command{
 		}
 		err = speak.Play(tempAudioResponseFile.Name())
 		if err != nil {
-			formatter.Error(fmt.Sprintf("Response playback error: %v", err))
-			return
+			log.Fatal("Response playback error:", err)
 		}
 
 		if askOutputFormat == "default" {

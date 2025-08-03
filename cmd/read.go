@@ -3,10 +3,10 @@ package cmd
 import (
 	"fmt"
 	"io"
+	"log"
 	"os"
 
 	"github.com/ctrl-vfr/persona/internal/openai"
-	"github.com/ctrl-vfr/persona/internal/output"
 	"github.com/ctrl-vfr/persona/internal/speak"
 	"github.com/ctrl-vfr/persona/internal/ui"
 
@@ -25,7 +25,6 @@ var readCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		personaName := args[0]
 		filePath := args[1]
-		formatter := output.New(output.ParseFormat(readOutputFormat))
 
 		if readOutputFormat == "default" {
 			terminalWidth := ui.GetTerminalWidth()
@@ -35,22 +34,19 @@ var readCmd = &cobra.Command{
 		// Load persona
 		currentPersona, err := storageManager.GetPersona(personaName)
 		if err != nil {
-			formatter.Error(fmt.Sprintf("Error loading persona: %v", err))
-			return
+			log.Fatal("Error loading persona:", err)
 		}
 
 		// Load configuration
 		appConfig, err := storageManager.GetConfig()
 		if err != nil {
-			formatter.Error(fmt.Sprintf("Error loading configuration: %v", err))
-			return
+			log.Fatal("Error loading configuration:", err)
 		}
 
 		// Read file content
 		content, err := os.ReadFile(filePath)
 		if err != nil {
-			formatter.Error(fmt.Sprintf("Error reading file: %v", err))
-			return
+			log.Fatal("Error reading file:", err)
 		}
 
 		textContent := string(content)
@@ -67,26 +63,22 @@ var readCmd = &cobra.Command{
 		}
 		audioResponseData, err := aiClient.GenerateAudio(textContent, currentPersona.Voice.Instructions)
 		if err != nil {
-			formatter.Error(fmt.Sprintf("Audio generation error: %v", err))
-			return
+			log.Fatal("Audio generation error:", err)
 		}
 
 		audioBytes, err := io.ReadAll(audioResponseData)
 		if err != nil {
-			formatter.Error(fmt.Sprintf("Audio data read error: %v", err))
-			return
+			log.Fatal("Audio data read error:", err)
 		}
 
 		tempAudioResponseFile, err := os.CreateTemp("", "persona-read-*.mp3")
 		if err != nil {
-			formatter.Error(fmt.Sprintf("Temporary audio file creation error: %v", err))
-			return
+			log.Fatal("Temporary audio file creation error:", err)
 		}
 
 		err = os.WriteFile(tempAudioResponseFile.Name(), audioBytes, 0644)
 		if err != nil {
-			formatter.Error(fmt.Sprintf("Audio file write error: %v", err))
-			return
+			log.Fatal("Audio file write error:", err)
 		}
 
 		if readOutputFormat == "default" {
@@ -94,8 +86,7 @@ var readCmd = &cobra.Command{
 		}
 		err = speak.Play(tempAudioResponseFile.Name())
 		if err != nil {
-			formatter.Error(fmt.Sprintf("Text reading error: %v", err))
-			return
+			log.Fatal("Text reading error:", err)
 		}
 
 		if readOutputFormat == "default" {
@@ -103,8 +94,7 @@ var readCmd = &cobra.Command{
 		}
 		err = os.Remove(tempAudioResponseFile.Name())
 		if err != nil {
-			formatter.Error(fmt.Sprintf("Temporary audio file removal error: %v", err))
-			return
+			log.Fatal("Temporary audio file removal error:", err)
 		}
 	},
 }

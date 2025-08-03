@@ -1,6 +1,5 @@
 # 🎭 Persona - Votre Assistant Vocal IA Personnel
 
-
 ![Footer](./docs/images/Robot.png)
 
 Salut ! 👋 **Persona** est votre nouveau compagnon vocal intelligent qui transforme votre terminal en un espace de conversation magique ! Imaginez pouvoir discuter avec Marceline (la vampire rebelle d'Adventure Time), Freud, ou même créer votre propre personnage IA unique. C'est exactement ce que Persona vous offre ! 🚀
@@ -8,7 +7,7 @@ Salut ! 👋 **Persona** est votre nouveau compagnon vocal intelligent qui trans
 ## ✨ Pourquoi vous allez adorer Persona
 
 ![Features Overview](./docs/images/default-help-output.png)
-*Vue d'ensemble des fonctionnalités principales*
+_Vue d'ensemble des fonctionnalités principales_
 
 - 🎤 **Conversations naturelles** - Parlez simplement à votre micro, Persona comprend tout !
 - 🎭 **Personnalités uniques** - De Marceline la rebelle à Sherlock Holmes, chaque persona a sa propre âme
@@ -32,6 +31,7 @@ Bon, on va pas se mentir, il faut installer quelques trucs avant de pouvoir caus
    # Vérifiez si vous l'avez déjà
    go version
    ```
+
    > Pas de Go ? Pas de souci ! Téléchargez-le sur [golang.org](https://golang.org/dl/)
 
 2. **FFmpeg** (le couteau suisse de l'audio/vidéo)
@@ -197,7 +197,7 @@ prompt: |- # Instrction pour le LLM
 ### Personas inclus (la team de choc !)
 
 ![Persona Gallery](./docs/images/persona-gallery.png)
-*Galerie des personas disponibles*
+_Galerie des personas disponibles_
 
 L'application débarque avec 6 personnalités totalement barjots et attachantes :
 
@@ -260,7 +260,7 @@ audio:
 
 ### Personnalisation des modèles
 
-Vous pouvez utiliser différents modèles OpenAI  dans le fichiers de configuration : `~/.persona/config.yaml`
+Vous pouvez utiliser différents modèles OpenAI dans le fichiers de configuration : `~/.persona/config.yaml`
 
 ## 🎮 Intégration Stream Deck
 
@@ -275,7 +275,7 @@ Vous streamez ? Vous avez un Stream Deck ? Perfect ! Persona s'intègre parfaite
 # Lancer un chat avec Marceline
 C:\path\to\persona.exe chat marceline
 
-# Demander quelque chose à Freud 
+# Demander quelque chose à Freud
 # Après une seconde de silence, le processus enverra le contenu automaiquement et freud vous répondra (attention il est chelou lui)
 C:\path\to\persona.exe ask freud "Analyze my streaming setup"
 
@@ -285,13 +285,13 @@ C:\path\to\persona.exe read coach "C:\Scripts\motivation.txt"
 
 ### Idées de boutons Stream Deck
 
-| 🎯 Bouton | 🎭 Persona | 💡 Usage |
-|---------|-----------|---------|
-| **Motivation** | Coach | Questions motivantes pendant le stream |
-| **Tech Support** | Kevin | Aide technique en direct |
-| **Fun Facts** | Merlin | Anecdotes mystérieuses |
-| **Roast Mode** | Marceline | Moqueries amicales du chat |
-| **Analysis** | Freud | Psychanalyse du gameplay |
+| 🎯 Bouton        | 🎭 Persona | 💡 Usage                               |
+| ---------------- | ---------- | -------------------------------------- |
+| **Motivation**   | Coach      | Questions motivantes pendant le stream |
+| **Tech Support** | Kevin      | Aide technique en direct               |
+| **Fun Facts**    | Merlin     | Anecdotes mystérieuses                 |
+| **Roast Mode**   | Marceline  | Moqueries amicales du chat             |
+| **Analysis**     | Freud      | Psychanalyse du gameplay               |
 
 ### Tips de streamer
 
@@ -303,9 +303,6 @@ C:\path\to\persona.exe read coach "C:\Scripts\motivation.txt"
 ---
 
 ## 🎨 Interface utilisateur
-
-![UI Overview](./docs/images/ui-overview.png)
-*Vue d'ensemble de l'interface utilisateur*
 
 ### Navigation dans le TUI
 
@@ -340,7 +337,7 @@ Pas de panique ! Même les meilleurs ont parfois des petits pépins. Voici comme
 # macOS/Linux
 echo $OPENAI_API_KEY
 # Windows (cmd)
-echo %OPENAI_API_KEY% 
+echo %OPENAI_API_KEY%
 ```
 
 **2. Aucun périphérique audio trouvé**
@@ -354,16 +351,14 @@ ffmpeg -f dshow -list_devices true -i dummy  # Windows
 ffmpeg -f avfoundation -list_devices true -i ""  # macOS
 ```
 
-
 **3. Interface déformée dans le terminal**
 
 - Agrandir la taille du terminal (minimum 80x24)
 - Utiliser un terminal moderne supportant les couleurs
 
-
 ## 📄 Licence
 
-Ce projet est sous licence MIT - en gros, faites-en ce que vous voulez, mais gardez les crédits ! 😉 
+Ce projet est sous licence MIT - en gros, faites-en ce que vous voulez, mais gardez les crédits ! 😉
 Voir le fichier [LICENSE](LICENSE) pour les détails juridiques ennuyeux.
 
 ## 🙏 Remerciements (les vrais MVP !)
@@ -371,10 +366,8 @@ Voir le fichier [LICENSE](LICENSE) pour les détails juridiques ennuyeux.
 - 🎨 [Charmbracelet](https://charm.sh/) - Pour avoir rendu les TUI sexy again
 - 🤖 [OpenAI](https://openai.com/) - Pour les cerveaux de nos personas
 - 🎵 [FFmpeg](https://ffmpeg.org/) - Le magicien de l'audio depuis toujours
-- ⚡ [Cobra](https://github.com/spf13/cobra) - Pour une CLI qui claque
+- 🐍 [Cobra](https://github.com/spf13/cobra) - Pour une CLI qui claque
 
 ---
 
 ![Footer](./docs/images/Heart.png)
-
-

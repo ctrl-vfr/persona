@@ -9,8 +9,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Global output format variables are defined in version.go
-
 var listCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all available personas",

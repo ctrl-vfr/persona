@@ -1,3 +1,4 @@
+// Package openai provides a client for interacting with the OpenAI API
 package openai
 
 import (

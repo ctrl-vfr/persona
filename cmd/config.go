@@ -16,8 +16,6 @@ var configCmd = &cobra.Command{
 	Long:  "Commands to display and manage application configuration",
 }
 
-// Global output format variables are defined in version.go
-
 var showConfigCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Display current configuration",
