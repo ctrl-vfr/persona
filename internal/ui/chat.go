@@ -131,22 +131,15 @@ func NewChatModel(p *persona.Persona, ai *openai.OpenAI, manager *storage.Manage
 		height = MIN_TERMINAL_HEIGHT
 	}
 
-	// Ensure minimum dimensions
-	if width < MIN_TERMINAL_WIDTH {
-		width = MIN_TERMINAL_WIDTH
-	}
-	if height < MIN_TERMINAL_HEIGHT {
-		height = MIN_TERMINAL_HEIGHT
-	}
+	width = max(width, MIN_TERMINAL_WIDTH)
+	height = max(height, MIN_TERMINAL_HEIGHT)
 
 	// Calculate responsive dimensions
 	viewportWidth, viewportHeight, inputHeight := GetChatLayoutDimensions(width, height)
 
 	// Initialize viewport with margins
 	vp := viewport.New(viewportWidth, viewportHeight)
-	vp.Style = lipgloss.NewStyle().
-		MarginLeft(HORIZONTAL_MARGIN).
-		MarginRight(HORIZONTAL_MARGIN)
+	vp.Style = lipgloss.NewStyle().MarginLeft(HORIZONTAL_MARGIN).MarginRight(HORIZONTAL_MARGIN)
 
 	// Initialize text area
 	ta := textarea.New()
@@ -205,7 +198,6 @@ func (m *ChatModel) Init() tea.Cmd {
 }
 
 func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-
 	// Handle common messages first
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -231,14 +223,10 @@ func (m *ChatModel) updatePersonaSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		if m.width < MIN_TERMINAL_WIDTH {
-			m.width = MIN_TERMINAL_WIDTH
-		}
-		if m.height < MIN_TERMINAL_HEIGHT {
-			m.height = MIN_TERMINAL_HEIGHT
-		}
+		m.width = max(msg.Width, MIN_TERMINAL_WIDTH)
+		m.height = max(msg.Height, MIN_TERMINAL_HEIGHT)
+
+		// Recalculate list dimensions to use full terminal width
 		m.personaList.SetSize(m.width-4, m.height-4)
 
 	case tea.KeyMsg:
@@ -416,17 +404,12 @@ func (m *ChatModel) View() string {
 func (m *ChatModel) viewPersonaSelector() string {
 	var sections []string
 
-	// Title
+	// Title with full width
 	sections = append(sections, RenderChatBoxTitle("🎭 Sélection de Persona", m.width))
 
-	// Persona list in a chat-style box with dynamic height
-	listHeight := m.height - 8 // Reserve space for title, help and margins
-	if listHeight < 10 {
-		listHeight = 10
-	}
-	sections = append(sections, RenderChatBoxBorder(m.personaList.View(), m.width, listHeight))
+	sections = append(sections, RenderChatBoxBorder(m.personaList.View(), m.width, m.height-8))
 
-	// Simple help without box
+	// Simple help without box, using full width
 	var helpLines []string
 	helpLines = append(helpLines, "💡 Ctrl+C: Quitter | ↑/↓: Naviguer | Enter: Sélectionner | /: Rechercher")
 	if m.persona != nil {
@@ -438,7 +421,10 @@ func (m *ChatModel) viewPersonaSelector() string {
 		m.errorMsg = "" // Clear after showing
 	}
 
-	sections = append(sections, strings.Join(helpLines, " | "))
+	// Center the help text within the full terminal width
+	helpText := strings.Join(helpLines, " | ")
+	centeredHelp := lipgloss.PlaceHorizontal(m.width, lipgloss.Center, helpText)
+	sections = append(sections, centeredHelp)
 
 	return strings.Join(sections, "\n")
 }
@@ -568,6 +554,9 @@ func (m *ChatModel) transcribeAudio(filename string) tea.Cmd {
 		}
 
 		transcript, err := m.ai.Transcribe(dataToTranscribe)
+		if err != nil {
+			return transcriptionFinishedMsg{err: err}
+		}
 		err = dataToTranscribe.Close()
 		if err != nil {
 			return transcriptionFinishedMsg{err: err}
@@ -671,7 +660,7 @@ func (m *ChatModel) playAudio(audioData []byte) tea.Cmd {
 		defer os.Remove(tempFile.Name())
 
 		// Write audio data
-		if err := os.WriteFile(tempFile.Name(), audioData, 0644); err != nil {
+		if err := os.WriteFile(tempFile.Name(), audioData, 0o644); err != nil {
 			m.state = StateError
 			m.errorMsg = fmt.Sprintf("❌ Audio write error: %v", err)
 			return nil
@@ -720,13 +709,8 @@ func NewChatModelWithSelector(manager *storage.Manager, config *config.Config, o
 		height = MIN_TERMINAL_HEIGHT
 	}
 
-	// Ensure minimum dimensions
-	if width < MIN_TERMINAL_WIDTH {
-		width = MIN_TERMINAL_WIDTH
-	}
-	if height < MIN_TERMINAL_HEIGHT {
-		height = MIN_TERMINAL_HEIGHT
-	}
+	width = max(width, MIN_TERMINAL_WIDTH)
+	height = max(height, MIN_TERMINAL_HEIGHT)
 
 	// Get available personas
 	personas, err := manager.ListPersonas()
@@ -753,9 +737,13 @@ func NewChatModelWithSelector(manager *storage.Manager, config *config.Config, o
 	}
 
 	// Initialize persona list
-	l := list.New(items, list.NewDefaultDelegate(), width-4, height-4)
-	l.Title = "Sélectionnez un persona"
+	delegate := itemDelegate{
+		width: width,
+	}
+	l := list.New(items, delegate, width-4, height-4)
 	l.SetShowStatusBar(false)
+	l.SetShowHelp(false)
+	l.SetShowTitle(false)
 	l.SetFilteringEnabled(true)
 	l.Styles.Title = l.Styles.Title.
 		Foreground(lipgloss.Color("#FAFAFA")).

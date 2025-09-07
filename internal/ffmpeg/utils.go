@@ -23,6 +23,7 @@ func ListAudioDevices() ([]string, error) {
 	}
 
 	var devices []string
+	var stderrOutput strings.Builder
 	scanner := bufio.NewScanner(stderr)
 
 	// Updated regex to match device lines - ffmpeg outputs device names in quotes
@@ -30,6 +31,10 @@ func ListAudioDevices() ([]string, error) {
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		
+		// Capture all stderr output for error reporting
+		stderrOutput.WriteString(line)
+		stderrOutput.WriteString("\n")
 
 		// Look for device names with the specified type
 		matches := deviceRegex.FindStringSubmatch(line)
@@ -41,10 +46,17 @@ func ListAudioDevices() ([]string, error) {
 		}
 	}
 
-	// Wait for command to finish (it will error out, which is expected)
+	// Wait for command to finish (it will error out, which is expected for this command)
 	err = cmd.Wait()
 	if err != nil {
-		return nil, fmt.Errorf("ffmpeg process failed: %w", err)
+		// For device listing, FFmpeg always returns an error code, but that's expected
+		// Only return error if we couldn't parse any devices and there's indication of a real problem
+		if len(devices) == 0 {
+			stderrText := stderrOutput.String()
+			if strings.Contains(stderrText, "Unknown input format") || strings.Contains(stderrText, "No such file or directory") {
+				return nil, fmt.Errorf("ffmpeg device listing failed: %w\nFFmpeg stderr output:\n%s", err, stderrText)
+			}
+		}
 	}
 
 	return devices, nil

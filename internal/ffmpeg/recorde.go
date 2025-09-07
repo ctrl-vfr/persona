@@ -61,7 +61,7 @@ func (f *FFmpeg) Record() (string, error) {
 		tempFile.Name(),
 	)
 
-	// Get stderr pipe to monitor silence detection
+	// Get stderr pipe to monitor silence detection and capture errors
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return "", fmt.Errorf("failed to create stderr pipe: %w", err)
@@ -72,12 +72,22 @@ func (f *FFmpeg) Record() (string, error) {
 		return "", fmt.Errorf("failed to start ffmpeg: %w", err)
 	}
 
-	// Monitor stderr for silence detection
+	// Capture all stderr output for error logging
+	var stderrOutput strings.Builder
+	silenceDetected := false
+
+	// Monitor stderr for silence detection and capture all output
 	scanner := bufio.NewScanner(stderr)
 	for scanner.Scan() {
 		line := scanner.Text()
+		
+		// Always capture stderr output for error reporting
+		stderrOutput.WriteString(line)
+		stderrOutput.WriteString("\n")
+		
 		// Stop recording when silence is detected
 		if strings.Contains(line, "silencedetect @") && strings.Contains(line, "silence_start:") {
+			silenceDetected = true
 			if err := cmd.Process.Kill(); err != nil {
 				fmt.Printf("Warning: failed to kill ffmpeg process: %v\n", err)
 			}
@@ -88,6 +98,17 @@ func (f *FFmpeg) Record() (string, error) {
 	// Wait for command to complete
 	err = cmd.Wait()
 	if err != nil {
+		// If silence was detected and process was killed by us, that's expected behavior
+		if silenceDetected {
+			// This is normal - we killed the process after detecting silence
+			return tempFile.Name(), nil
+		}
+		
+		// Real error - include stderr output for debugging
+		stderrText := stderrOutput.String()
+		if stderrText != "" {
+			return "", fmt.Errorf("ffmpeg process failed: %w\nFFmpeg stderr output:\n%s", err, stderrText)
+		}
 		return "", fmt.Errorf("ffmpeg process failed: %w", err)
 	}
 
