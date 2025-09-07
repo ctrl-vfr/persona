@@ -1,5 +1,4 @@
-// Config package for persona configuration
-// It contains the configuration structure and methods to load and save it
+// Package config provides a configuration struct and methods for loading and saving it.
 package config
 
 import (

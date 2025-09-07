@@ -1,3 +1,4 @@
+// Package config provides a configuration struct and methods for loading and saving it.
 package persona
 
 import (

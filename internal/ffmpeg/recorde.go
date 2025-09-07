@@ -1,3 +1,4 @@
+// Package speak provides a method to play a file using the speaker.
 package ffmpeg
 
 import (
@@ -80,11 +81,11 @@ func (f *FFmpeg) Record() (string, error) {
 	scanner := bufio.NewScanner(stderr)
 	for scanner.Scan() {
 		line := scanner.Text()
-		
+
 		// Always capture stderr output for error reporting
 		stderrOutput.WriteString(line)
 		stderrOutput.WriteString("\n")
-		
+
 		// Stop recording when silence is detected
 		if strings.Contains(line, "silencedetect @") && strings.Contains(line, "silence_start:") {
 			silenceDetected = true
@@ -103,7 +104,7 @@ func (f *FFmpeg) Record() (string, error) {
 			// This is normal - we killed the process after detecting silence
 			return tempFile.Name(), nil
 		}
-		
+
 		// Real error - include stderr output for debugging
 		stderrText := stderrOutput.String()
 		if stderrText != "" {

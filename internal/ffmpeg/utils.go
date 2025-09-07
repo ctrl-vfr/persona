@@ -31,7 +31,7 @@ func ListAudioDevices() ([]string, error) {
 
 	for scanner.Scan() {
 		line := scanner.Text()
-		
+
 		// Capture all stderr output for error reporting
 		stderrOutput.WriteString(line)
 		stderrOutput.WriteString("\n")

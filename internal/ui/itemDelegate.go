@@ -61,5 +61,8 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	styledDesc := descStyle.Render(description)
 	content := lipgloss.JoinVertical(lipgloss.Left, styledTitle, styledDesc)
 
-	fmt.Fprint(w, containerStyle.Render(content))
+	_, err := fmt.Fprint(w, containerStyle.Render(content))
+	if err != nil {
+		fmt.Println(err)
+	}
 }
