@@ -226,21 +226,25 @@ func (m *ChatModel) updatePersonaSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = max(msg.Width, MIN_TERMINAL_WIDTH)
 		m.height = max(msg.Height, MIN_TERMINAL_HEIGHT)
 
-		// Recalculate list dimensions to use full terminal width
-		m.personaList.SetSize(m.width-4, m.height-4)
+		// Recalculate list dimensions to use full terminal width (only if initialized)
+		if m.personaList.Items != nil {
+			m.personaList.SetSize(m.width-4, m.height-4)
+		}
 
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "enter":
-			// Get selected persona
-			if selectedItem := m.personaList.SelectedItem(); selectedItem != nil {
-				if persona, ok := selectedItem.(PersonaItem); ok {
-					err := m.SwitchToPersona(persona.name)
-					if err != nil {
-						m.errorMsg = fmt.Sprintf("Error changing persona: %v", err)
+			// Get selected persona (only if persona list is initialized)
+			if m.personaList.Items != nil {
+				if selectedItem := m.personaList.SelectedItem(); selectedItem != nil {
+					if persona, ok := selectedItem.(PersonaItem); ok {
+						err := m.SwitchToPersona(persona.name)
+						if err != nil {
+							m.errorMsg = fmt.Sprintf("Error changing persona: %v", err)
+							return m, nil
+						}
 						return m, nil
 					}
-					return m, nil
 				}
 			}
 		case "ctrl+s":
@@ -252,8 +256,10 @@ func (m *ChatModel) updatePersonaSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	// Update persona list
-	m.personaList, cmd = m.personaList.Update(msg)
+	// Update persona list (only if initialized)
+	if m.personaList.Items != nil {
+		m.personaList, cmd = m.personaList.Update(msg)
+	}
 	return m, cmd
 }
 
@@ -407,7 +413,12 @@ func (m *ChatModel) viewPersonaSelector() string {
 	// Title with full width
 	sections = append(sections, RenderChatBoxTitle("🎭 Sélection de Persona", m.width))
 
-	sections = append(sections, RenderChatBoxBorder(m.personaList.View(), m.width, m.height-8))
+	// Only show persona list if it's initialized
+	if m.personaList.Items != nil {
+		sections = append(sections, RenderChatBoxBorder(m.personaList.View(), m.width, m.height-8))
+	} else {
+		sections = append(sections, RenderChatBoxBorder("No personas available", m.width, m.height-8))
+	}
 
 	// Simple help without box, using full width
 	var helpLines []string

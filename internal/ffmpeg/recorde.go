@@ -52,6 +52,8 @@ func (f *FFmpeg) Record() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp file: %w", err)
 	}
+	// Close the file handle immediately so FFmpeg can use it
+	tempFile.Close()
 	// Build ffmpeg command
 	cmd := exec.Command(
 		"ffmpeg.exe",
