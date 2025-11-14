@@ -56,7 +56,7 @@ var showConfigCmd = &cobra.Command{
 		}
 		// Indent each line with 2 spaces
 		lines := fmt.Sprintf("%s", configData)
-		for _, line := range strings.Split(lines, "\n") {
+		for line := range strings.SplitSeq(lines, "\n") {
 			if line != "" {
 				fmt.Printf("  %s\n", line)
 			}
@@ -69,7 +69,7 @@ var pathConfigCmd = &cobra.Command{
 	Short: "Display configuration paths",
 	Run: func(cmd *cobra.Command, args []string) {
 		if outputJSON {
-			pathData := map[string]interface{}{
+			pathData := map[string]any{
 				"config_dir":   storageManager.BasePath,
 				"config_file":  storageManager.BasePath + "/config.yaml",
 				"personas_dir": storageManager.BasePath + "/personas/",
@@ -122,7 +122,7 @@ var setInputDeviceCmd = &cobra.Command{
 		}
 
 		if outputJSON {
-			result := map[string]interface{}{
+			result := map[string]any{
 				"device": deviceName,
 				"status": "configured",
 			}

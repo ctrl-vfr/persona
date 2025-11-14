@@ -339,6 +339,7 @@ func (m *ChatModel) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.state = StateError
 			m.errorMsg = fmt.Sprintf("❌ Recording error: %v", msg.err)
+			log.Printf("Recording error: %v", msg.err)
 			return m, nil
 		}
 		m.state = StateTranscribing
@@ -349,6 +350,7 @@ func (m *ChatModel) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.state = StateError
 			m.errorMsg = fmt.Sprintf("❌ Transcription error: %v", msg.err)
+			log.Printf("Transcription error: %v", msg.err)
 			return m, nil
 		}
 		m.addUserMessage(msg.text)
@@ -360,6 +362,7 @@ func (m *ChatModel) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.state = StateError
 			m.errorMsg = fmt.Sprintf("❌ Chat error: %v", msg.err)
+			log.Printf("Chat error: %v", msg.err)
 			return m, nil
 		}
 		m.addAssistantMessage(msg.response)
@@ -371,6 +374,7 @@ func (m *ChatModel) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.state = StateError
 			m.errorMsg = fmt.Sprintf("❌ Audio generation error: %v", msg.err)
+			log.Printf("Audio generation error: %v", msg.err)
 			return m, nil
 		}
 		m.state = StatePlaying
@@ -568,15 +572,16 @@ func (m *ChatModel) transcribeAudio(filename string) tea.Cmd {
 		}
 
 		transcript, err := m.ai.Transcribe(dataToTranscribe)
-		err = dataToTranscribe.Close()
 		if err != nil {
+			dataToTranscribe.Close()
+			os.Remove(filename)
 			return transcriptionFinishedMsg{err: err}
 		}
-		err = os.Remove(filename)
-		if err != nil {
-			return transcriptionFinishedMsg{err: err}
-		}
-		return transcriptionFinishedMsg{text: transcript, err: err}
+
+		dataToTranscribe.Close()
+		os.Remove(filename)
+
+		return transcriptionFinishedMsg{text: transcript, err: nil}
 	}
 }
 

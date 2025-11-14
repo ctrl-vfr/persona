@@ -51,7 +51,11 @@ func (f *FFmpeg) Record() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create temp file: %w", err)
 	}
-	// Build ffmpeg command
+
+	if f.Recorder.Input == "" {
+		return "", fmt.Errorf("no input device configured. Use 'persona config set-input-device <device>' to configure")
+	}
+
 	cmd := exec.Command(
 		"ffmpeg.exe",
 		"-f", "dshow",
@@ -61,34 +65,46 @@ func (f *FFmpeg) Record() (string, error) {
 		tempFile.Name(),
 	)
 
-	// Get stderr pipe to monitor silence detection
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return "", fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 
-	// Start the command
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("failed to start ffmpeg: %w", err)
 	}
 
-	// Monitor stderr for silence detection
+	processWasKilled := false
+	var stderrOutput strings.Builder
+
 	scanner := bufio.NewScanner(stderr)
 	for scanner.Scan() {
 		line := scanner.Text()
-		// Stop recording when silence is detected
+		stderrOutput.WriteString(line + "\n")
+
 		if strings.Contains(line, "silencedetect @") && strings.Contains(line, "silence_start:") {
 			if err := cmd.Process.Kill(); err != nil {
 				fmt.Printf("Warning: failed to kill ffmpeg process: %v\n", err)
+			} else {
+				processWasKilled = true
 			}
 			break
 		}
 	}
 
-	// Wait for command to complete
 	err = cmd.Wait()
+
+	if err != nil && !processWasKilled {
+		return "", fmt.Errorf("ffmpeg process failed: %w\nFFmpeg output:\n%s", err, stderrOutput.String())
+	}
+
+	fileInfo, err := os.Stat(tempFile.Name())
 	if err != nil {
-		return "", fmt.Errorf("ffmpeg process failed: %w", err)
+		return "", fmt.Errorf("failed to verify recording file: %w", err)
+	}
+
+	if fileInfo.Size() == 0 {
+		return "", fmt.Errorf("recording file is empty - no audio was captured")
 	}
 
 	return tempFile.Name(), nil

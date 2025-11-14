@@ -1,4 +1,4 @@
-// Main package for persona command-line tool
+// Package cmd contains the main command and subcommands
 package cmd
 
 import (

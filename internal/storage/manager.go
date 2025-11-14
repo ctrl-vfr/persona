@@ -36,6 +36,9 @@ var merlinYAML []byte
 //go:embed assets/personas/racoon.yaml
 var racoonYAML []byte
 
+//go:embed assets/personas/journaliste.yaml
+var journalisteYAML []byte
+
 type Manager struct {
 	BasePath string
 }
@@ -55,6 +58,7 @@ func GetBuiltinPersonas() []BuiltinPersona {
 		{"kevin", kevinYAML},
 		{"merlin", merlinYAML},
 		{"racoon", racoonYAML},
+		{"journaliste", journalisteYAML},
 	}
 }
 
