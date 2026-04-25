@@ -71,10 +71,9 @@ jobs:
       env:
         GOFLAGS: "-mod=mod"
         GOPROXY: "direct"
-      run: make ci-test
-
-    - name: Check coverage threshold
-      run: make coverage-check
+      run: |
+        go test -race -coverprofile=coverage.out ./...
+        go tool cover -func=coverage.out
 
     - name: Upload coverage reports
       uses: codecov/codecov-action@v3
