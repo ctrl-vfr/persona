@@ -10,16 +10,11 @@ import (
 
 // RenderPersonaListBox renders persona list in a chat-style box
 func RenderPersonaListBox(personas []string, terminalWidth int) string {
-	var lines []string
-
-	// Build the persona list content
+	lines := make([]string, 0, len(personas))
 	for _, persona := range personas {
-		lines = append(lines, fmt.Sprintf("  🤖 %s", persona))
+		lines = append(lines, "  "+iconAssistant+" "+persona)
 	}
-
 	content := strings.Join(lines, "\n")
-
-	// Use the same style as chat boxes
 	return RenderChatBoxBorder(content, terminalWidth, len(lines)+4)
 }
 

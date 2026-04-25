@@ -1,8 +1,8 @@
 package ui
 
 import (
+	"context"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"strings"
@@ -76,7 +76,16 @@ type ChatModel struct {
 	// File watching
 	personaWatcher  *watcher.PersonaWatcher
 	instanceManager *watcher.InstanceManager
-	heartbeatStop   chan bool
+
+	// Persona selector preview cache: name -> loaded persona. Filled
+	// once at startup so the preview pane re-renders without disk I/O
+	// on every keystroke.
+	previewCache map[string]*persona.Persona
+
+	// itemDelegate is kept here so we can re-bind it with the current
+	// pane width on every selector render. list.Model owns the live
+	// delegate as an unexported field, so we can't read it back.
+	listDelegate itemDelegate
 
 	// Display state
 	messages  []string
@@ -92,6 +101,20 @@ type ChatModel struct {
 
 	// Audio settings
 	isMuted bool
+
+	// Lifecycle context cancelled in Cleanup. Used to abort in-flight
+	// OpenAI requests when the user quits the TUI.
+	rootCtx    context.Context
+	cancelRoot context.CancelFunc
+}
+
+// ctx returns the model's lifecycle context. Created lazily so models
+// constructed without explicit context (older callers, tests) still work.
+func (m *ChatModel) ctx() context.Context {
+	if m.rootCtx == nil {
+		m.rootCtx, m.cancelRoot = context.WithCancel(context.Background())
+	}
+	return m.rootCtx
 }
 
 // Message types for async operations
@@ -131,22 +154,15 @@ func NewChatModel(p *persona.Persona, ai *openai.OpenAI, manager *storage.Manage
 		height = MIN_TERMINAL_HEIGHT
 	}
 
-	// Ensure minimum dimensions
-	if width < MIN_TERMINAL_WIDTH {
-		width = MIN_TERMINAL_WIDTH
-	}
-	if height < MIN_TERMINAL_HEIGHT {
-		height = MIN_TERMINAL_HEIGHT
-	}
+	width = max(width, MIN_TERMINAL_WIDTH)
+	height = max(height, MIN_TERMINAL_HEIGHT)
 
 	// Calculate responsive dimensions
 	viewportWidth, viewportHeight, inputHeight := GetChatLayoutDimensions(width, height)
 
 	// Initialize viewport with margins
 	vp := viewport.New(viewportWidth, viewportHeight)
-	vp.Style = lipgloss.NewStyle().
-		MarginLeft(HORIZONTAL_MARGIN).
-		MarginRight(HORIZONTAL_MARGIN)
+	vp.Style = lipgloss.NewStyle().MarginLeft(HORIZONTAL_MARGIN).MarginRight(HORIZONTAL_MARGIN)
 
 	// Initialize text area
 	ta := textarea.New()
@@ -181,13 +197,13 @@ func NewChatModel(p *persona.Persona, ai *openai.OpenAI, manager *storage.Manage
 	// Initialize file watcher
 	if personaWatcher, err := watcher.NewPersonaWatcher(manager, p.Name); err == nil {
 		model.personaWatcher = personaWatcher
-		personaWatcher.Start()
+		personaWatcher.Start(model.ctx())
 	}
 
 	// Initialize instance manager
 	model.instanceManager = watcher.NewInstanceManager(manager)
 	if err := model.instanceManager.RegisterInstance(); err == nil {
-		model.heartbeatStop = model.instanceManager.StartHeartbeat()
+		model.instanceManager.StartHeartbeat(model.ctx())
 	}
 
 	// Add initial greeting with responsive styling
@@ -205,7 +221,6 @@ func (m *ChatModel) Init() tea.Cmd {
 }
 
 func (m *ChatModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-
 	// Handle common messages first
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
@@ -231,15 +246,12 @@ func (m *ChatModel) updatePersonaSelector(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		if m.width < MIN_TERMINAL_WIDTH {
-			m.width = MIN_TERMINAL_WIDTH
-		}
-		if m.height < MIN_TERMINAL_HEIGHT {
-			m.height = MIN_TERMINAL_HEIGHT
-		}
-		m.personaList.SetSize(m.width-4, m.height-4)
+		m.width = max(msg.Width, MIN_TERMINAL_WIDTH)
+		m.height = max(msg.Height, MIN_TERMINAL_HEIGHT)
+		// Real list-pane dims are recomputed in viewPersonaSelector;
+		// the SetSize call here just primes the list with reasonable
+		// defaults so the first paint after resize is not blank.
+		m.personaList.SetSize(max(m.width*40/100, 24), max(m.height-4, MIN_VIEWPORT_HEIGHT))
 
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -338,8 +350,7 @@ func (m *ChatModel) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case recordingFinishedMsg:
 		if msg.err != nil {
 			m.state = StateError
-			m.errorMsg = fmt.Sprintf("❌ Recording error: %v", msg.err)
-			log.Printf("Recording error: %v", msg.err)
+			m.errorMsg = fmt.Sprintf(iconError+" Recording error: %v", msg.err)
 			return m, nil
 		}
 		m.state = StateTranscribing
@@ -349,8 +360,7 @@ func (m *ChatModel) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case transcriptionFinishedMsg:
 		if msg.err != nil {
 			m.state = StateError
-			m.errorMsg = fmt.Sprintf("❌ Transcription error: %v", msg.err)
-			log.Printf("Transcription error: %v", msg.err)
+			m.errorMsg = fmt.Sprintf(iconError+" Transcription error: %v", msg.err)
 			return m, nil
 		}
 		m.addUserMessage(msg.text)
@@ -361,8 +371,7 @@ func (m *ChatModel) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case chatFinishedMsg:
 		if msg.err != nil {
 			m.state = StateError
-			m.errorMsg = fmt.Sprintf("❌ Chat error: %v", msg.err)
-			log.Printf("Chat error: %v", msg.err)
+			m.errorMsg = fmt.Sprintf(iconError+" Chat error: %v", msg.err)
 			return m, nil
 		}
 		m.addAssistantMessage(msg.response)
@@ -373,8 +382,7 @@ func (m *ChatModel) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case audioFinishedMsg:
 		if msg.err != nil {
 			m.state = StateError
-			m.errorMsg = fmt.Sprintf("❌ Audio generation error: %v", msg.err)
-			log.Printf("Audio generation error: %v", msg.err)
+			m.errorMsg = fmt.Sprintf(iconError+" Audio generation error: %v", msg.err)
 			return m, nil
 		}
 		m.state = StatePlaying
@@ -418,33 +426,151 @@ func (m *ChatModel) View() string {
 }
 
 func (m *ChatModel) viewPersonaSelector() string {
-	var sections []string
+	// Lipgloss layering (style.go:415-447): Width/Height include
+	// padding but NOT border. Border is applied last and adds 2 cells
+	// per axis. So for an outer frame whose total dim must equal the
+	// terminal:
+	//   - frameStyle.Width  = m.width  - 2  (gives total m.width)
+	//   - frameStyle.Height = m.height - 2  (gives total m.height)
+	// The actual usable content area inside (after the frame's
+	// horizontal padding of 1 on each side) is then m.width - 4 wide
+	// and m.height - 2 tall.
+	frameWidth := max(m.width-2, MIN_TERMINAL_WIDTH-2)
+	frameHeight := max(m.height-2, MIN_TERMINAL_HEIGHT-2)
+	innerWidth := max(m.width-4, MIN_TERMINAL_WIDTH-4)
+	innerHeight := max(m.height-2, MIN_TERMINAL_HEIGHT-2)
 
-	// Title
-	sections = append(sections, RenderChatBoxTitle("🎭 Sélection de Persona", m.width))
+	// Header: brand pill + count of available personas.
+	count := fmt.Sprintf("%d personas", len(m.personaList.Items()))
+	header := accentAltPill(iconBrand, "persona") + " " + metaPill(iconUser, count)
+	headerLine := lipgloss.PlaceHorizontal(innerWidth, lipgloss.Left, header)
 
-	// Persona list in a chat-style box with dynamic height
-	listHeight := m.height - 8 // Reserve space for title, help and margins
-	if listHeight < 10 {
-		listHeight = 10
+	// Footer: keybindings as accent pills.
+	keys := []string{
+		accentPill("↑↓", "navigate"),
+		accentPill("⏎", "select"),
+		accentPill("/", "search"),
 	}
-	sections = append(sections, RenderChatBoxBorder(m.personaList.View(), m.width, listHeight))
-
-	// Simple help without box
-	var helpLines []string
-	helpLines = append(helpLines, "💡 Ctrl+C: Quitter | ↑/↓: Naviguer | Enter: Sélectionner | /: Rechercher")
 	if m.persona != nil {
-		helpLines = append(helpLines, "   Ctrl+S: Retourner au chat")
+		keys = append(keys, accentAltPill("⌃S", "back to chat"))
 	}
-
+	keys = append(keys, mutedPill("⌃C", "quit"))
+	footer := lipgloss.PlaceHorizontal(innerWidth, lipgloss.Center, strings.Join(keys, " "))
+	footerHeight := 1
 	if m.errorMsg != "" {
-		helpLines = append(helpLines, RenderError(m.errorMsg))
-		m.errorMsg = "" // Clear after showing
+		footer = lipgloss.PlaceHorizontal(innerWidth, lipgloss.Center, RenderError(m.errorMsg)) + "\n" + footer
+		footerHeight = 2
+		m.errorMsg = ""
 	}
 
-	sections = append(sections, strings.Join(helpLines, " | "))
+	// Body fills what's left between header and footer. Header(1) +
+	// blank line(1) + footer(footerHeight) + blank line(1).
+	bodyHeight := max(innerHeight-3-footerHeight, MIN_VIEWPORT_HEIGHT)
 
-	return strings.Join(sections, "\n")
+	// Split body horizontally: list on the left (~45%), preview on
+	// the right (~55%) with a 1-column gap.
+	rightWidth := max(innerWidth*55/100, 36)
+	leftWidth := max(innerWidth-rightWidth-1, 24)
+
+	// Re-bind the delegate width and resize the list every render so
+	// items track the current pane width.
+	m.listDelegate.width = leftWidth
+	m.personaList.SetDelegate(m.listDelegate)
+	m.personaList.SetSize(leftWidth, bodyHeight)
+	listView := m.personaList.View()
+
+	// Same layering rule for the inner peach pane: pass total - 2 to
+	// Width/Height so border + padding land inside rightWidth × bodyHeight.
+	previewFrameWidth := max(rightWidth-2, 20)
+	previewFrameHeight := max(bodyHeight-2, 4)
+	previewContent := max(rightWidth-4, 18) // total - 2 border - 2 padding
+	previewView := focusedBorderStyle.
+		Width(previewFrameWidth).
+		Height(previewFrameHeight).
+		Render(m.renderPersonaPreview(previewContent))
+
+	body := lipgloss.JoinHorizontal(lipgloss.Top, listView, " ", previewView)
+
+	content := strings.Join([]string{headerLine, "", body, "", footer}, "\n")
+
+	// frameWidth / frameHeight = total - 2 (border) so the rendered
+	// box matches the terminal exactly. MaxWidth/MaxHeight is a final
+	// belt-and-braces clip in case some inner widget overshoots.
+	return outerFrameStyle.
+		Width(frameWidth).
+		Height(frameHeight).
+		MaxWidth(m.width).
+		MaxHeight(m.height).
+		Render(content)
+}
+
+// renderPersonaPreview renders the detail panel for the currently
+// highlighted persona. Reads from previewCache to avoid disk I/O on
+// every redraw. Falls back gracefully if the cache misses (e.g. a
+// freshly-created persona not yet in the cache).
+func (m *ChatModel) renderPersonaPreview(width int) string {
+	item, ok := m.personaList.SelectedItem().(PersonaItem)
+	if !ok {
+		return mutedStyle.Render("No persona selected")
+	}
+
+	p := m.previewCache[item.name]
+	if p == nil {
+		// Lazy fallback: load on miss and store for next render.
+		loaded, err := m.manager.GetPersona(item.name)
+		if err != nil {
+			return RenderError(fmt.Sprintf("Cannot load %s: %v", item.name, err))
+		}
+		if m.previewCache == nil {
+			m.previewCache = map[string]*persona.Persona{}
+		}
+		m.previewCache[item.name] = loaded
+		p = loaded
+	}
+
+	// Header: persona name as accent pill with its custom glyph.
+	title := accentPill(personaIcon(p.Name), p.Name)
+
+	// Metadata pills: voice + history count.
+	historyText := fmt.Sprintf("%d msg", len(p.History))
+	meta := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		metaPill(iconSpeak, p.Voice.Name),
+		" ",
+		metaPill(iconClock, historyText),
+	)
+
+	// Prompt body: rendered through the markdown pipeline so headings
+	// and inline code in system prompts come out themed. Truncated to
+	// 12 lines to keep the panel readable on small terminals.
+	prompt := strings.TrimSpace(p.Prompt)
+	rendered := renderMarkdown(prompt, width)
+	rendered = truncateLines(rendered, 12)
+	if rendered == "" {
+		rendered = mutedStyle.Render("(no system prompt)")
+	}
+
+	// Voice instructions in a smaller subtle block underneath.
+	var voiceBlock string
+	if vi := strings.TrimSpace(p.Voice.Instructions); vi != "" {
+		voiceBlock = subtleStyle.Render("Voice ─ ") + mutedStyle.Render(truncateLines(vi, 4))
+	}
+
+	parts := []string{title, meta, "", rendered}
+	if voiceBlock != "" {
+		parts = append(parts, "", voiceBlock)
+	}
+	return strings.Join(parts, "\n")
+}
+
+// truncateLines keeps at most n lines of s, appending an ellipsis pill
+// when the input was longer.
+func truncateLines(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[:n], "\n") + "\n" + mutedStyle.Render("…")
 }
 
 func (m *ChatModel) viewChat() string {
@@ -453,10 +579,10 @@ func (m *ChatModel) viewChat() string {
 	// Chat box title with decorative border
 	title := fmt.Sprintf("Chat avec %s", m.persona.Name)
 	if instances, err := m.instanceManager.GetActiveInstances(); err == nil && len(instances) > 1 {
-		title += fmt.Sprintf(" 👥 (%d instances)", len(instances))
+		title += fmt.Sprintf(" %s %d instances", iconUser, len(instances))
 	}
 	if m.isMuted {
-		title += " 🔇"
+		title += " " + iconMute
 	}
 	sections = append(sections, RenderChatBoxTitle(title, m.width))
 
@@ -468,7 +594,7 @@ func (m *ChatModel) viewChat() string {
 	// Input area or status message in a box
 	if m.state == StateIdle {
 		sections = append(sections, RenderInputBox(m.textArea.View(), m.width))
-		sections = append(sections, RenderMuted("💡 Ctrl+R: Enregistrer | Enter: Envoyer | Ctrl+L: Effacer | Ctrl+M: Mute | Ctrl+S: Changer persona | Ctrl+C: Quitter"))
+		sections = append(sections, RenderMuted(iconInfo+" Ctrl+R record · Enter send · Ctrl+L clear · Ctrl+M mute · Ctrl+S switch · Ctrl+C quit"))
 	} else {
 		if m.errorMsg != "" {
 			sections = append(sections, RenderInputBox(RenderError(m.errorMsg), m.width))
@@ -512,7 +638,7 @@ func (m *ChatModel) addAssistantMessage(message string) {
 }
 
 func (m *ChatModel) addWelcomeMessage() {
-	welcomeMessage := "Bonjour ! Je suis prêt à discuter avec vous. 🎤 Tapez votre message ou utilisez Ctrl+R pour enregistrer un message vocal."
+	welcomeMessage := "Bonjour ! Je suis prêt à discuter avec vous. " + iconRecord + " Tapez votre message ou utilisez Ctrl+R pour enregistrer un message vocal."
 	rendered := RenderAssistantMessage(m.persona.Name, welcomeMessage, m.width, 0, false)
 	m.addMessage(rendered)
 }
@@ -544,7 +670,7 @@ func (m *ChatModel) clearConversation() {
 	err := m.persona.SaveHistory(historyPath)
 	if err != nil {
 		m.state = StateError
-		m.errorMsg = fmt.Sprintf("❌ History save error: %v", err)
+		m.errorMsg = fmt.Sprintf(iconError+" History save error: %v", err)
 		return
 	}
 	m.messages = []string{}
@@ -571,17 +697,19 @@ func (m *ChatModel) transcribeAudio(filename string) tea.Cmd {
 			return transcriptionFinishedMsg{err: err}
 		}
 
-		transcript, err := m.ai.Transcribe(dataToTranscribe)
+		transcript, err := m.ai.Transcribe(m.ctx(), dataToTranscribe)
 		if err != nil {
-			dataToTranscribe.Close()
-			os.Remove(filename)
 			return transcriptionFinishedMsg{err: err}
 		}
-
-		dataToTranscribe.Close()
-		os.Remove(filename)
-
-		return transcriptionFinishedMsg{text: transcript, err: nil}
+		err = dataToTranscribe.Close()
+		if err != nil {
+			return transcriptionFinishedMsg{err: err}
+		}
+		err = os.Remove(filename)
+		if err != nil {
+			return transcriptionFinishedMsg{err: err}
+		}
+		return transcriptionFinishedMsg{text: transcript, err: err}
 	}
 }
 
@@ -617,7 +745,7 @@ func (m *ChatModel) sendMessage(message string) tea.Cmd {
 		}
 
 		// Get AI response
-		response, err := m.ai.Chat(aiMessages)
+		response, err := m.ai.Chat(m.ctx(), aiMessages)
 		if err != nil {
 			return chatFinishedMsg{err: err}
 		}
@@ -633,7 +761,7 @@ func (m *ChatModel) sendMessage(message string) tea.Cmd {
 		err = m.persona.SaveHistory(historyPath)
 		if err != nil {
 			m.state = StateError
-			m.errorMsg = fmt.Sprintf("❌ History save error: %v", err)
+			m.errorMsg = fmt.Sprintf(iconError+" History save error: %v", err)
 			return chatFinishedMsg{err: err}
 		}
 
@@ -643,16 +771,10 @@ func (m *ChatModel) sendMessage(message string) tea.Cmd {
 
 func (m *ChatModel) generateAudio(text string) tea.Cmd {
 	return func() tea.Msg {
-		data, err := m.ai.GenerateAudio(text, m.persona.Voice.Instructions)
+		audio, err := m.ai.GenerateAudio(m.ctx(), text, m.persona.Voice.Instructions)
 		if err != nil {
 			return audioFinishedMsg{err: err}
 		}
-
-		audio, err := io.ReadAll(data)
-		if err != nil {
-			return audioFinishedMsg{err: err}
-		}
-
 		return audioFinishedMsg{audioData: audio, err: nil}
 	}
 }
@@ -666,27 +788,34 @@ func (m *ChatModel) playAudio(audioData []byte) tea.Cmd {
 			return nil
 		}
 
-		// Create temporary file
+		// Create temporary file. Close immediately so WriteFile owns
+		// the descriptor; defer Remove only after successful write so
+		// we don't delete a file we never wrote to.
 		tempFile, err := os.CreateTemp("", "persona-*.mp3")
 		if err != nil {
 			m.state = StateError
-			m.errorMsg = fmt.Sprintf("❌ Temporary file creation error: %v", err)
+			m.errorMsg = fmt.Sprintf(iconError+" Temporary file creation error: %v", err)
 			return nil
 		}
-		defer os.Remove(tempFile.Name())
-
-		// Write audio data
-		if err := os.WriteFile(tempFile.Name(), audioData, 0644); err != nil {
+		tempPath := tempFile.Name()
+		if err := tempFile.Close(); err != nil {
+			_ = os.Remove(tempPath)
 			m.state = StateError
-			m.errorMsg = fmt.Sprintf("❌ Audio write error: %v", err)
+			m.errorMsg = fmt.Sprintf(iconError+" Temporary file close error: %v", err)
 			return nil
 		}
 
-		// Play audio
-		err = speak.Play(tempFile.Name())
-		if err != nil {
+		if err := os.WriteFile(tempPath, audioData, 0o600); err != nil {
+			_ = os.Remove(tempPath)
 			m.state = StateError
-			m.errorMsg = fmt.Sprintf("❌ Audio read error: %v", err)
+			m.errorMsg = fmt.Sprintf(iconError+" Audio write error: %v", err)
+			return nil
+		}
+		defer func() { _ = os.Remove(tempPath) }()
+
+		if err := speak.Play(tempPath); err != nil {
+			m.state = StateError
+			m.errorMsg = fmt.Sprintf(iconError+" Audio read error: %v", err)
 			return nil
 		}
 
@@ -698,19 +827,17 @@ func (m *ChatModel) playAudio(audioData []byte) tea.Cmd {
 	}
 }
 
-// Cleanup cleans up resources when the chat is closed
+// Cleanup cleans up resources when the chat is closed.
+// cancelRoot stops the heartbeat and watcher goroutines via ctx.
 func (m *ChatModel) Cleanup() {
+	if m.cancelRoot != nil {
+		m.cancelRoot()
+	}
 	if m.personaWatcher != nil {
 		m.personaWatcher.Stop()
 	}
-
-	if m.heartbeatStop != nil {
-		close(m.heartbeatStop)
-	}
-
 	if m.instanceManager != nil {
-		err := m.instanceManager.UnregisterInstance()
-		if err != nil {
+		if err := m.instanceManager.UnregisterInstance(); err != nil {
 			log.Printf("Error unsubscribing instance: %v", err)
 		}
 	}
@@ -725,13 +852,8 @@ func NewChatModelWithSelector(manager *storage.Manager, config *config.Config, o
 		height = MIN_TERMINAL_HEIGHT
 	}
 
-	// Ensure minimum dimensions
-	if width < MIN_TERMINAL_WIDTH {
-		width = MIN_TERMINAL_WIDTH
-	}
-	if height < MIN_TERMINAL_HEIGHT {
-		height = MIN_TERMINAL_HEIGHT
-	}
+	width = max(width, MIN_TERMINAL_WIDTH)
+	height = max(height, MIN_TERMINAL_HEIGHT)
 
 	// Get available personas
 	personas, err := manager.ListPersonas()
@@ -739,16 +861,23 @@ func NewChatModelWithSelector(manager *storage.Manager, config *config.Config, o
 		personas = []string{}
 	}
 
+	// Pre-load every persona once so the preview pane and the list
+	// description can read from memory instead of hitting disk on every
+	// keystroke. Cost is negligible (a handful of small YAML files).
+	previewCache := make(map[string]*persona.Persona, len(personas))
+
 	// Create persona items for the list
 	items := make([]list.Item, 0, len(personas))
 	for _, p := range personas {
-		// Try to load persona to get description from prompt
 		personaData, err := manager.GetPersona(p)
 		description := "AI Persona"
-		if err == nil && len(personaData.Prompt) > 50 {
-			description = personaData.Prompt[:50] + "..."
-		} else if err == nil {
-			description = personaData.Prompt
+		if err == nil {
+			previewCache[p] = personaData
+			if len(personaData.Prompt) > 50 {
+				description = personaData.Prompt[:50] + "..."
+			} else {
+				description = personaData.Prompt
+			}
 		}
 
 		items = append(items, PersonaItem{
@@ -757,14 +886,18 @@ func NewChatModelWithSelector(manager *storage.Manager, config *config.Config, o
 		})
 	}
 
-	// Initialize persona list
-	l := list.New(items, list.NewDefaultDelegate(), width-4, height-4)
-	l.Title = "Sélectionnez un persona"
+	// Initialize persona list. Delegate width is updated per render
+	// to match the current pane width.
+	delegate := itemDelegate{width: width}
+	l := list.New(items, delegate, width-4, height-4)
 	l.SetShowStatusBar(false)
+	l.SetShowHelp(false)
+	l.SetShowTitle(false)
 	l.SetFilteringEnabled(true)
 	l.Styles.Title = l.Styles.Title.
-		Foreground(lipgloss.Color("#FAFAFA")).
-		Background(lipgloss.Color("#7D56F4")).
+		Foreground(colBase).
+		Background(accent).
+		Bold(true).
 		Padding(0, 1)
 
 	// Initialize other components
@@ -790,6 +923,8 @@ func NewChatModelWithSelector(manager *storage.Manager, config *config.Config, o
 		inputDevice:      config.Audio.InputDevice,
 		silenceThreshold: config.Audio.SilenceThreshold,
 		silenceDuration:  config.Audio.SilenceDuration,
+		previewCache:     previewCache,
+		listDelegate:     delegate,
 	}
 
 	return model
@@ -867,18 +1002,17 @@ func (m *ChatModel) initializeWatchers() error {
 	// Initialize file watcher
 	if personaWatcher, err := watcher.NewPersonaWatcher(m.manager, m.persona.Name); err == nil {
 		m.personaWatcher = personaWatcher
-		personaWatcher.Start()
+		personaWatcher.Start(m.ctx())
 	} else {
 		return fmt.Errorf("unable to initialize persona watcher: %w", err)
 	}
 
 	// Initialize instance manager
 	m.instanceManager = watcher.NewInstanceManager(m.manager)
-	if err := m.instanceManager.RegisterInstance(); err == nil {
-		m.heartbeatStop = m.instanceManager.StartHeartbeat()
-	} else {
+	if err := m.instanceManager.RegisterInstance(); err != nil {
 		return fmt.Errorf("unable to initialize instance manager: %w", err)
 	}
+	m.instanceManager.StartHeartbeat(m.ctx())
 
 	return nil
 }

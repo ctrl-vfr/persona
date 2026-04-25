@@ -7,187 +7,103 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Layout constants
+// Layout constants — ratios of the terminal grid, not colours.
 const (
-	// Borders and padding
 	BORDER_SIZE       = 1
 	HORIZONTAL_MARGIN = 2
 	VERTICAL_MARGIN   = 1
 
-	// Reserved space
-	TITLE_HEIGHT        = 2  // Title + border
-	STATUS_HEIGHT       = 2  // Status message
-	INPUT_HEIGHT        = 2  // Input box + border
-	HELP_TEXT_HEIGHT    = 1  // Help text
-	BOTTOM_MARGIN       = 2  // Extra margin at bottom
-	MIN_VIEWPORT_HEIGHT = 10 // Minimum height for chat viewport
+	TITLE_HEIGHT        = 2
+	STATUS_HEIGHT       = 2
+	INPUT_HEIGHT        = 2
+	HELP_TEXT_HEIGHT    = 1
+	BOTTOM_MARGIN       = 2
+	MIN_VIEWPORT_HEIGHT = 10
 
-	// Minimum dimensions
 	MIN_TERMINAL_WIDTH  = 40
 	MIN_TERMINAL_HEIGHT = 20
 	MIN_MESSAGE_WIDTH   = 20
 )
 
-// Theme colors
+// Exported lipgloss styles. All colours come from theme.go; do not
+// hard-code hex values here. Anything written below should reach for
+// the palette aliases (`accent`, `accentAlt`, `colText`, …) so a
+// flavor swap re-themes the whole UI.
 var (
-	PrimaryColor    = lipgloss.Color("#FF6B9D")
-	SecondaryColor  = lipgloss.Color("#B8E6B8")
-	AccentColor     = lipgloss.Color("#FFE66D")
-	BackgroundColor = lipgloss.Color("#1A1A2E")
-	TextColor       = lipgloss.Color("#FFFFFF")
-	MutedColor      = lipgloss.Color("#8E8E93")
-	ErrorColor      = lipgloss.Color("#FF4757")
-	SuccessColor    = lipgloss.Color("#2ECC71")
-	WarningColor    = lipgloss.Color("#F39C12")
-	InfoColor       = lipgloss.Color("#3498DB")
-
-	TitleColor   = lipgloss.Color("#6143df")
-	ContentColor = lipgloss.Color("#ff79d0")
-	// Message background colors (improved for better contrast)
-	UserBgColor      = lipgloss.Color("#2563eb") // Modern blue
-	AssistantBgColor = lipgloss.Color("#6143df") // Modern purple
-	SystemBgColor    = lipgloss.Color("#6b7280") // Neutral gray
-)
-
-// ClockEmojis for message age indication
-var ClockEmojis = []string{"🕛", "🕐", "🕑", "🕒", "🕓", "🕔", "🕕", "🕖", "🕘", "🕙"}
-
-// Common styles
-var (
-	// Header styles
 	TitleStyle = lipgloss.NewStyle().
-			Foreground(TitleColor).
-			Bold(true).Transform(strings.ToUpper).MarginBottom(1).MarginTop(1).MarginLeft(2)
+			Foreground(accent).
+			Bold(true).
+			Transform(strings.ToUpper).
+			MarginTop(1).
+			MarginBottom(1).
+			MarginLeft(2)
 
 	ContentStyle = lipgloss.NewStyle().
-			Foreground(ContentColor).MarginLeft(4)
+			Foreground(colText).
+			MarginLeft(4)
 
 	SubtitleStyle = lipgloss.NewStyle().
-			Foreground(SecondaryColor).
-			Bold(true).
-			MarginBottom(0)
+			Foreground(accentAlt).
+			Bold(true)
 
 	MutedStyle = lipgloss.NewStyle().
-			Foreground(MutedColor).
+			Foreground(muted).
 			Italic(true)
 
-	// Message styles
-	UserMessageStyle = lipgloss.NewStyle().
-				Foreground(AccentColor).
-				Bold(true).
-				Padding(0, 1).
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(AccentColor).
-				BorderLeft(true)
+	UserMessageStyle      = userBubbleStyle
+	AssistantMessageStyle = assistantBubbleStyle
+	SystemMessageStyle    = systemBubbleStyle
 
-	AssistantMessageStyle = lipgloss.NewStyle().
-				Foreground(SecondaryColor).
-				Padding(0, 1).
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(SecondaryColor).
-				BorderLeft(true)
+	SuccessStyle = successStyle
+	ErrorStyle   = errorStyle
+	WarningStyle = warningStyle
+	InfoStyle    = infoStyle
 
-	SystemMessageStyle = lipgloss.NewStyle().
-				Foreground(MutedColor).
-				Italic(true)
-	// Status styles
-	SuccessStyle = lipgloss.NewStyle().
-			Foreground(SuccessColor).
-			Bold(true)
+	InputStyle = inputStyle
 
-	ErrorStyle = lipgloss.NewStyle().
-			Foreground(ErrorColor).
-			Bold(true)
-
-	WarningStyle = lipgloss.NewStyle().
-			Foreground(WarningColor).
-			Bold(true)
-
-	InfoStyle = lipgloss.NewStyle().
-			Foreground(InfoColor).
-			Bold(true)
-
-	// Input styles
-	InputStyle = lipgloss.NewStyle().
-			Foreground(TextColor).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(PrimaryColor).
-			MarginBottom(1)
-
-	// List styles
 	ListItemStyle = lipgloss.NewStyle().
-			Foreground(TextColor).
+			Foreground(colText).
 			Padding(0, 2)
 
 	SelectedListItemStyle = lipgloss.NewStyle().
-				Foreground(BackgroundColor).
-				Background(PrimaryColor).
+				Foreground(colBase).
+				Background(accent).
 				Bold(true).
 				Padding(0, 2)
 
-	// Progress styles
-	ProgressBarStyle = lipgloss.NewStyle().
-				Foreground(PrimaryColor)
-
-	ProgressTextStyle = lipgloss.NewStyle().
-				Foreground(MutedColor)
+	ProgressBarStyle  = lipgloss.NewStyle().Foreground(accent)
+	ProgressTextStyle = lipgloss.NewStyle().Foreground(muted)
 )
 
-// GetUserMessageStyle styles with proper width
+// GetUserMessageStyle returns a width-aware copy of the user bubble.
 func GetUserMessageStyle(terminalWidth int) lipgloss.Style {
 	if terminalWidth < MIN_TERMINAL_WIDTH {
 		terminalWidth = MIN_TERMINAL_WIDTH
 	}
-
-	// Calculate usable width (terminal width minus borders and margins)
 	usableWidth := max(terminalWidth-(2*(BORDER_SIZE+HORIZONTAL_MARGIN)), MIN_MESSAGE_WIDTH)
-
-	// messageWidth := (usableWidth * 2) / 3 // 2/3 of usable width
-	messageWidth := max((usableWidth*2)/3, MIN_MESSAGE_WIDTH) // 2/3 of usable width
-
-	return lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(UserBgColor).
-		Padding(1, 2).
-		Margin(0, 1).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(UserBgColor).
-		Width(messageWidth)
+	messageWidth := max((usableWidth*2)/3, MIN_MESSAGE_WIDTH)
+	return userBubbleStyle.Width(messageWidth)
 }
 
+// GetAssistantMessageStyle returns a width-aware copy of the assistant bubble.
 func GetAssistantMessageStyle(terminalWidth int) lipgloss.Style {
 	if terminalWidth < MIN_TERMINAL_WIDTH {
 		terminalWidth = MIN_TERMINAL_WIDTH
 	}
-
-	// usableWidth := terminalWidth - (2 * (BORDER_SIZE))
-	usableWidth := max(terminalWidth-(2*(BORDER_SIZE)), MIN_MESSAGE_WIDTH)
-
-	// messageWidth := (usableWidth * 2) / 3
+	usableWidth := max(terminalWidth-(2*BORDER_SIZE), MIN_MESSAGE_WIDTH)
 	messageWidth := max((usableWidth*2)/3, MIN_MESSAGE_WIDTH)
-
-	return lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(AssistantBgColor).
-		Padding(1, 2).
-		Margin(0, 1).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(AssistantBgColor).
-		Width(messageWidth)
+	return assistantBubbleStyle.Width(messageWidth)
 }
 
-// GetStatusStyle Status message style
+// GetStatusStyle Status message style — accentAlt (Sky) so it doesn't
+// shout over the Peach pills.
 func GetStatusStyle(terminalWidth int) lipgloss.Style {
 	if terminalWidth < MIN_TERMINAL_WIDTH {
 		terminalWidth = MIN_TERMINAL_WIDTH
 	}
-
 	messageWidth := max(terminalWidth-(2*(BORDER_SIZE+HORIZONTAL_MARGIN)), MIN_MESSAGE_WIDTH)
-
 	return lipgloss.NewStyle().
-		Foreground(InfoColor).
+		Foreground(accentAlt).
 		Bold(true).
 		Width(messageWidth).
 		Align(lipgloss.Center)
@@ -201,26 +117,21 @@ func GetChatBoxStyle(terminalWidth, terminalHeight int) lipgloss.Style {
 	if terminalHeight < MIN_TERMINAL_HEIGHT {
 		terminalHeight = MIN_TERMINAL_HEIGHT
 	}
-
-	// Calculate viewport height (minimum height for chat viewport)
 	viewportHeight := max(terminalHeight-(TITLE_HEIGHT+STATUS_HEIGHT+INPUT_HEIGHT+HELP_TEXT_HEIGHT+BOTTOM_MARGIN), MIN_VIEWPORT_HEIGHT)
-	// Calculate box width
 	boxWidth := max(terminalWidth-(2*BORDER_SIZE), MIN_TERMINAL_WIDTH)
-
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(PrimaryColor).
+		BorderForeground(borderFocus).
 		Width(boxWidth).
 		Height(viewportHeight)
 }
 
+// GetChatTitleStyle uses an accent foreground over the default surface.
 func GetChatTitleStyle(terminalWidth int) lipgloss.Style {
 	boxWidth := max(terminalWidth-(2*BORDER_SIZE), MIN_TERMINAL_WIDTH)
-
 	return lipgloss.NewStyle().
 		Bold(true).
-		Foreground(PrimaryColor).
-		Background(BackgroundColor).
+		Foreground(accent).
 		Width(boxWidth).
 		Align(lipgloss.Center)
 }
@@ -228,10 +139,9 @@ func GetChatTitleStyle(terminalWidth int) lipgloss.Style {
 // GetInputBoxStyle box style
 func GetInputBoxStyle(terminalWidth int) lipgloss.Style {
 	boxWidth := max(max(terminalWidth, MIN_TERMINAL_WIDTH)-(2*BORDER_SIZE), MIN_TERMINAL_WIDTH)
-
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(PrimaryColor).
+		BorderForeground(accentAlt).
 		Width(boxWidth).
 		Height(INPUT_HEIGHT).
 		MarginBottom(1)
@@ -246,151 +156,127 @@ func RenderSubtitle(subtitle string) string {
 	return SubtitleStyle.Render(subtitle)
 }
 
+// Banner renderers — pill-styled status messages.
+
 func RenderSuccess(message string) string {
-	return SuccessStyle.Render("✅ " + message)
+	return successPill(iconSuccess, message)
 }
 
 func RenderError(message string) string {
-	return ErrorStyle.Render("❌ " + message)
+	return errorPill(iconError, message)
 }
 
 func RenderWarning(message string) string {
-	return WarningStyle.Render("⚠️  " + message)
+	return warningPill(iconWarning, message)
 }
 
 func RenderInfo(message string) string {
-	return InfoStyle.Render("ℹ️  " + message)
+	return infoPill(iconInfo, message)
 }
 
-// RenderUserMessage message renderers with PlaceHorizontal:
-func RenderUserMessage(message string, terminalWidth int, messageIndex int, isLatest bool) string {
-	// Add subtle time indicator for older messages
-	timeEmoji := ""
-	if !isLatest && messageIndex < len(ClockEmojis) {
-		timeEmoji = ClockEmojis[messageIndex%len(ClockEmojis)] + " "
-	}
-
-	// Format content with improved emoji and spacing
-	content := fmt.Sprintf("%s👤 %s", timeEmoji, message)
-	styledMessage := GetUserMessageStyle(terminalWidth).Render(content)
-
-	// Right-align user messages for chat-like appearance
-	return lipgloss.PlaceHorizontal(terminalWidth-(2*HORIZONTAL_MARGIN)-4, lipgloss.Right, styledMessage)
-}
-
-func RenderAssistantMessage(personaName, message string, terminalWidth int, messageIndex int, isLatest bool) string {
-	// Add persona indicator and format content
-	content := fmt.Sprintf("🤖 %s", message)
-	styledMessage := GetAssistantMessageStyle(terminalWidth).Render(content)
-
-	// Left-align assistant messages
-	return lipgloss.PlaceHorizontal(terminalWidth-(2*HORIZONTAL_MARGIN), lipgloss.Left, styledMessage)
-}
-
-// RenderRecordingStatus Status messages with animated emojis
-func RenderRecordingStatus(terminalWidth int) string {
-	return GetStatusStyle(terminalWidth).Render("🎤 🔴 Enregistrement en cours... Parlez maintenant!")
-}
-
-// RenderTranscribingStatus Status messages with animated emojis
-func RenderTranscribingStatus(terminalWidth int) string {
-	return GetStatusStyle(terminalWidth).Render("📝 ✍️  Transcription en cours...")
-}
-
-// RenderThinkingStatus Status messages with animated emojis
-func RenderThinkingStatus(terminalWidth int) string {
-	return GetStatusStyle(terminalWidth).Render("🤔 💭 Réflexion en cours...")
-}
-
-// RenderGeneratingAudioStatus Status messages with animated emojis
-func RenderGeneratingAudioStatus(terminalWidth int) string {
-	return GetStatusStyle(terminalWidth).Render("🎵 🔊 Génération audio en cours...")
-}
-
-// RenderPlayingStatus Status messages with animated emojis
-func RenderPlayingStatus(terminalWidth int) string {
-	return GetStatusStyle(terminalWidth).Render("🔈 🎶 Lecture en cours...")
-}
-
-// RenderMutedStatus Status messages with animated emojis
-func RenderMutedStatus(terminalWidth int) string {
-	return GetStatusStyle(terminalWidth).Render("🔇 Mode silencieux activé")
-}
-
-// RenderMuted helper function
 func RenderMuted(message string) string {
 	return MutedStyle.Render(message)
 }
 
-// RenderMessageWithSeparator Enhanced message rendering with better visual separation
+// RenderUserMessage renders a chat message from the user. Old messages
+// get a clock pill prefix; the latest one stays clean.
+func RenderUserMessage(message string, terminalWidth int, messageIndex int, isLatest bool) string {
+	prefix := metaPill(iconUser, "you")
+	if !isLatest {
+		prefix = metaPill(iconClock, fmt.Sprintf("#%d", messageIndex+1)) + " " + prefix
+	}
+	body := GetUserMessageStyle(terminalWidth).Render(message)
+	composed := prefix + "\n" + body
+	return lipgloss.PlaceHorizontal(terminalWidth-(2*HORIZONTAL_MARGIN)-4, lipgloss.Right, composed)
+}
+
+// RenderAssistantMessage renders a chat message from the active persona.
+// The body is passed through the Catppuccin glamour renderer (see
+// markdown_style.go) so markdown in responses (lists, code, emphasis)
+// gets coloured consistently with the rest of the TUI.
+func RenderAssistantMessage(personaName, message string, terminalWidth int, messageIndex int, isLatest bool) string {
+	prefix := accentPill(personaIcon(personaName), personaName)
+	style := GetAssistantMessageStyle(terminalWidth)
+	rendered := renderMarkdown(message, style.GetWidth())
+	body := style.Render(rendered)
+	composed := prefix + "\n" + body
+	return lipgloss.PlaceHorizontal(terminalWidth-(2*HORIZONTAL_MARGIN), lipgloss.Left, composed)
+}
+
+// Status pills — peach for active states, sky for transitional, yellow
+// for muted. Each is wrapped in GetStatusStyle so it centers on the
+// status row.
+
+func RenderRecordingStatus(terminalWidth int) string {
+	return GetStatusStyle(terminalWidth).Render(accentPill(iconRecord, "Recording — speak now"))
+}
+
+func RenderTranscribingStatus(terminalWidth int) string {
+	return GetStatusStyle(terminalWidth).Render(accentAltPill(iconTranscribe, "Transcribing"))
+}
+
+func RenderThinkingStatus(terminalWidth int) string {
+	return GetStatusStyle(terminalWidth).Render(accentPill(iconThink, "Thinking"))
+}
+
+func RenderGeneratingAudioStatus(terminalWidth int) string {
+	return GetStatusStyle(terminalWidth).Render(accentAltPill(iconSpeak, "Generating audio"))
+}
+
+func RenderPlayingStatus(terminalWidth int) string {
+	return GetStatusStyle(terminalWidth).Render(accentPill(iconPlaying, "Playing"))
+}
+
+func RenderMutedStatus(terminalWidth int) string {
+	return GetStatusStyle(terminalWidth).Render(mutedPill(iconMute, "Silent mode on"))
+}
+
+// RenderMessageWithSeparator adds a low-contrast separator between
+// stacked chat messages so they don't visually merge.
 func RenderMessageWithSeparator(message string, isLast bool) string {
 	if isLast {
 		return message
 	}
-	// Add subtle separator between messages
-	separator := MutedStyle.Render("─────")
+	separator := MutedStyle.Render("·····")
 	return message + "\n\n" + lipgloss.PlaceHorizontal(80, lipgloss.Center, separator)
 }
 
-// Helper function to add visual spacing between message groups
 func RenderMessageSpacing() string {
 	return "\n"
 }
 
-// RenderChatBoxTitle Chat box with decorative border
+// RenderChatBoxTitle wraps the title in an accent pill on the left and
+// pads the rest of the row with a thin separator. Cleaner than the
+// previous block-fill (▓) approach.
 func RenderChatBoxTitle(title string, terminalWidth int) string {
 	if terminalWidth < MIN_TERMINAL_WIDTH {
 		terminalWidth = MIN_TERMINAL_WIDTH
 	}
-
-	// Calculate available width for decorative characters
-	titleLength := len(title)
-	availableWidth := max(terminalWidth-(2*BORDER_SIZE)-titleLength-4, MIN_TERMINAL_WIDTH) // -4 for spaces around title
-
-	// Create decorative fill
-	leftPadding := availableWidth / 2
-	rightPadding := availableWidth - leftPadding
-
-	var titleContent string
-	if leftPadding > 0 {
-		leftFill := strings.Repeat("▓", leftPadding)
-		rightFill := strings.Repeat("▓", rightPadding)
-		titleContent = leftFill + " " + title + " " + rightFill
-	} else {
-		titleContent = " " + title + " "
-	}
-
-	return GetChatTitleStyle(terminalWidth).Render(titleContent)
+	pill := accentPill(iconAssistant, title)
+	pillWidth := lipgloss.Width(pill)
+	available := max(terminalWidth-(2*BORDER_SIZE)-pillWidth-2, 0)
+	separator := lipgloss.NewStyle().Foreground(colSurface1).Render(strings.Repeat("─", available))
+	return pill + " " + separator
 }
 
 func RenderChatBoxBorder(content string, terminalWidth, terminalHeight int) string {
-	boxStyle := GetChatBoxStyle(terminalWidth, terminalHeight)
-	return boxStyle.Render(content)
+	return GetChatBoxStyle(terminalWidth, terminalHeight).Render(content)
 }
 
 func RenderInputBox(content string, terminalWidth int) string {
-	inputStyle := GetInputBoxStyle(terminalWidth)
-	return inputStyle.Render(content)
+	return GetInputBoxStyle(terminalWidth).Render(content)
 }
 
 // GetChatLayoutDimensions Responsive layout helper
 func GetChatLayoutDimensions(terminalWidth, terminalHeight int) (viewportWidth, viewportHeight, inputHeight int) {
-	// Ensure minimum dimensions
 	if terminalWidth < MIN_TERMINAL_WIDTH {
 		terminalWidth = MIN_TERMINAL_WIDTH
 	}
 	if terminalHeight < MIN_TERMINAL_HEIGHT {
 		terminalHeight = MIN_TERMINAL_HEIGHT
 	}
-
-	// Calculate usable width (terminal width minus borders and margins)
-	viewportWidth = max(terminalWidth-(2*(BORDER_SIZE)), MIN_MESSAGE_WIDTH)
-
-	// Calculate viewport height
+	viewportWidth = max(terminalWidth-(2*BORDER_SIZE), MIN_MESSAGE_WIDTH)
 	viewportHeight = max(terminalHeight-(TITLE_HEIGHT+STATUS_HEIGHT+INPUT_HEIGHT+HELP_TEXT_HEIGHT+BOTTOM_MARGIN), MIN_VIEWPORT_HEIGHT)
-
-	// Input height is fixed
-	inputHeight = INPUT_HEIGHT // Account for input box borders
-
+	inputHeight = INPUT_HEIGHT
 	return viewportWidth, viewportHeight, inputHeight
 }
