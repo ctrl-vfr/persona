@@ -1,7 +1,7 @@
+/persona
 *.exe
 *.exe~
 scripts/*
-.crush/
 CLAUDE.md
 # Binaries
 *.exe
@@ -19,3 +19,5 @@ vendor/
 *.swp
 # Logs
 *.log
+# MacOS
+.DS_Store
