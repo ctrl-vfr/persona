@@ -23,7 +23,11 @@ func main() {
 	cmd.Setup(mgr)
 
 	rootCmd := cmd.GetRootCmd()
-	if err := fang.Execute(context.Background(), rootCmd); err != nil {
+	if err := fang.Execute(
+		context.Background(),
+		rootCmd,
+		fang.WithColorSchemeFunc(cmd.CatppuccinFangScheme),
+	); err != nil {
 		os.Exit(1)
 	}
 }
