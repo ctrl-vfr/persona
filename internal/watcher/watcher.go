@@ -1,8 +1,14 @@
+// Package watcher exposes filesystem watchers and a multi-instance
+// coordination layer (.instances.json) for the persona TUI. It uses
+// fsnotify to react to local edits and to changes performed by other
+// running instances.
 package watcher
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -14,13 +20,17 @@ import (
 	"github.com/fsnotify/fsnotify"
 )
 
+// maxInstancesFileBytes caps how much we read from .instances.json to
+// guard against a corrupted or maliciously inflated lock file.
+const maxInstancesFileBytes = 1 << 20 // 1 MiB
+
 type PersonaWatcher struct {
 	watcher         *fsnotify.Watcher
 	manager         *storage.Manager
 	personaName     string
 	onUpdate        func(*persona.Persona)
 	onHistoryUpdate func([]persona.Message)
-	stopChan        chan bool
+	cancel          context.CancelFunc
 }
 
 type InstanceManager struct {
@@ -40,7 +50,6 @@ func NewPersonaWatcher(manager *storage.Manager, personaName string) (*PersonaWa
 		watcher:     watcher,
 		manager:     manager,
 		personaName: personaName,
-		stopChan:    make(chan bool),
 	}
 
 	// Watch the persona's directory
@@ -74,8 +83,11 @@ func (pw *PersonaWatcher) SetOnHistoryUpdate(callback func([]persona.Message)) {
 	pw.onHistoryUpdate = callback
 }
 
-// Start begins watching for file changes
-func (pw *PersonaWatcher) Start() {
+// Start begins watching for file changes. The goroutine exits when
+// ctx is cancelled or when Stop is called.
+func (pw *PersonaWatcher) Start(ctx context.Context) {
+	ctx, cancel := context.WithCancel(ctx)
+	pw.cancel = cancel
 	go func() {
 		for {
 			select {
@@ -83,29 +95,27 @@ func (pw *PersonaWatcher) Start() {
 				if !ok {
 					return
 				}
-
 				if event.Has(fsnotify.Write) {
 					pw.handleFileChange(event.Name)
 				}
-
 			case err, ok := <-pw.watcher.Errors:
 				if !ok {
 					return
 				}
 				log.Printf("Watcher error: %v", err)
-
-			case <-pw.stopChan:
+			case <-ctx.Done():
 				return
 			}
 		}
 	}()
 }
 
-// Stop stops the file watcher
+// Stop stops the file watcher. Safe to call multiple times.
 func (pw *PersonaWatcher) Stop() {
-	close(pw.stopChan)
-	err := pw.watcher.Close()
-	if err != nil {
+	if pw.cancel != nil {
+		pw.cancel()
+	}
+	if err := pw.watcher.Close(); err != nil {
 		log.Printf("Warning: failed to close watcher: %v", err)
 	}
 }
@@ -219,54 +229,54 @@ type InstanceInfo struct {
 	LastSeen  time.Time `json:"last_seen"`
 }
 
-// loadInstances loads instance information from file
+// loadInstances loads instance information from file. The read is
+// bounded to avoid OOM if the lock file is corrupted/oversized.
 func (im *InstanceManager) loadInstances() (map[string]InstanceInfo, error) {
-	if _, err := os.Stat(im.lockFilePath); os.IsNotExist(err) {
-		return make(map[string]InstanceInfo), nil
-	}
-
-	data, err := os.ReadFile(im.lockFilePath)
+	f, err := os.Open(im.lockFilePath)
 	if err != nil {
-		return nil, err
+		if os.IsNotExist(err) {
+			return make(map[string]InstanceInfo), nil
+		}
+		return nil, fmt.Errorf("open instances file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	data, err := io.ReadAll(io.LimitReader(f, maxInstancesFileBytes))
+	if err != nil {
+		return nil, fmt.Errorf("read instances file: %w", err)
 	}
 
 	var instances map[string]InstanceInfo
 	if err := json.Unmarshal(data, &instances); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("parse instances file: %w", err)
 	}
-
 	return instances, nil
 }
 
-// saveInstances saves instance information to file
+// saveInstances saves instance information to file atomically.
 func (im *InstanceManager) saveInstances(instances map[string]InstanceInfo) error {
 	data, err := json.MarshalIndent(instances, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal instances: %w", err)
 	}
-
-	return os.WriteFile(im.lockFilePath, data, 0644)
+	return storage.WriteFileAtomic(im.lockFilePath, data, storage.UserFileMode)
 }
 
-// StartHeartbeat starts a heartbeat goroutine to keep this instance marked as active
-func (im *InstanceManager) StartHeartbeat() chan bool {
-	stopChan := make(chan bool)
-
+// StartHeartbeat starts a heartbeat goroutine to keep this instance
+// marked as active. It exits when ctx is cancelled.
+func (im *InstanceManager) StartHeartbeat(ctx context.Context) {
 	go func() {
-		ticker := time.NewTicker(30 * time.Second) // Update every 30 seconds
+		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
-
 		for {
 			select {
 			case <-ticker.C:
 				if err := im.UpdateLastSeen(); err != nil {
 					log.Printf("Warning: failed to update last seen: %v", err)
 				}
-			case <-stopChan:
+			case <-ctx.Done():
 				return
 			}
 		}
 	}()
-
-	return stopChan
 }

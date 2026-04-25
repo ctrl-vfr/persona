@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"io"
-	"log"
 	"os"
 
 	"github.com/ctrl-vfr/persona/internal/ffmpeg"
@@ -24,8 +22,9 @@ var askCmd = &cobra.Command{
 	Short: "Simple discussion with a persona (non-interactive)",
 	Long:  "Simple discussion mode, one question-answer at a time. Use 'persona chat' for interactive interface.",
 	Args:  cobra.ExactArgs(1),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		personaName := args[0]
+		ctx := cmd.Context()
 
 		if askOutputFormat == "default" {
 			terminalWidth := ui.GetTerminalWidth()
@@ -34,43 +33,46 @@ var askCmd = &cobra.Command{
 
 		currentPersona, err := storageManager.GetPersona(personaName)
 		if err != nil {
-			log.Fatal("Error loading persona:", err)
+			return fmt.Errorf("load persona: %w", err)
 		}
 
 		appConfig, err := storageManager.GetConfig()
 		if err != nil {
-			log.Fatal("Error loading configuration:", err)
+			return fmt.Errorf("load configuration: %w", err)
 		}
 
 		if appConfig.Audio.InputDevice == "" {
-			log.Fatal("Audio input device not configured. Use 'persona config set-input-device <device>'.")
+			return fmt.Errorf("audio input device not configured (use 'persona config set-input-device <device>')")
 		}
 
-		aiClient := openai.New(os.Getenv("OPENAI_API_KEY"), appConfig.Models.Transcription, appConfig.Models.Speech, appConfig.Models.Chat, currentPersona.Voice.Name)
+		apiKey := os.Getenv("OPENAI_API_KEY")
+		if apiKey == "" {
+			return fmt.Errorf("OPENAI_API_KEY is not set")
+		}
+		aiClient := openai.New(apiKey, appConfig.Models.Transcription, appConfig.Models.Speech, appConfig.Models.Chat, currentPersona.Voice.Name)
 
-		// Start recording
 		if askOutputFormat == "default" {
 			fmt.Println(ui.RenderInfo("🎤 Recording started... Speak now!"))
 		}
 		recorder := ffmpeg.New(appConfig.Audio.InputDevice, appConfig.Audio.SilenceThreshold, appConfig.Audio.SilenceDuration)
 		tempAudioFile, err := recorder.Record()
 		if err != nil {
-			log.Fatal("Audio recording error:", err)
+			return fmt.Errorf("audio recording: %w", err)
 		}
+		defer func() { _ = os.Remove(tempAudioFile) }()
 
 		audioDataToTranscribe, err := os.Open(tempAudioFile)
 		if err != nil {
-			log.Fatal("Error opening temporary file:", err)
+			return fmt.Errorf("open temporary audio file: %w", err)
 		}
-		defer os.Remove(tempAudioFile)
-		defer audioDataToTranscribe.Close()
+		defer func() { _ = audioDataToTranscribe.Close() }()
 
 		if askOutputFormat == "default" {
 			fmt.Println(ui.RenderInfo("📝 Transcribing..."))
 		}
-		transcription, err := aiClient.Transcribe(audioDataToTranscribe)
+		transcription, err := aiClient.Transcribe(ctx, audioDataToTranscribe)
 		if err != nil {
-			log.Fatal("Transcription error:", err)
+			return fmt.Errorf("transcription: %w", err)
 		}
 
 		if askOutputFormat == "default" {
@@ -84,7 +86,7 @@ var askCmd = &cobra.Command{
 		})
 
 		conversationMessages := currentPersona.GetMessages()
-		aiMessages := []openai.Message{}
+		aiMessages := make([]openai.Message, 0, len(conversationMessages))
 		for _, message := range conversationMessages {
 			aiMessages = append(aiMessages, openai.Message{
 				Role:    message.Role,
@@ -95,9 +97,9 @@ var askCmd = &cobra.Command{
 		if askOutputFormat == "default" {
 			fmt.Println(ui.RenderInfo("💭 Thinking..."))
 		}
-		aiResponse, err := aiClient.Chat(aiMessages)
+		aiResponse, err := aiClient.Chat(ctx, aiMessages)
 		if err != nil {
-			log.Fatal("AI chat error:", err)
+			return fmt.Errorf("ai chat: %w", err)
 		}
 
 		if askOutputFormat == "default" {
@@ -110,46 +112,44 @@ var askCmd = &cobra.Command{
 			Content: aiResponse,
 		})
 		_, historyPath := storageManager.GetPersonaPath(personaName)
-		err = currentPersona.SaveHistory(historyPath)
-		if err != nil {
-			log.Fatal(err)
+		if err := currentPersona.SaveHistory(historyPath); err != nil {
+			return fmt.Errorf("save history: %w", err)
 		}
 
 		if askOutputFormat == "default" {
 			fmt.Println(ui.RenderInfo("🔊 Generating audio..."))
 		}
-		audioResponseData, err := aiClient.GenerateAudio(aiResponse, currentPersona.Voice.Instructions)
+		audioBytes, err := aiClient.GenerateAudio(ctx, aiResponse, currentPersona.Voice.Instructions)
 		if err != nil {
-			log.Fatal("Audio generation error:", err)
-		}
-
-		audioBytes, err := io.ReadAll(audioResponseData)
-		if err != nil {
-			log.Fatal("Audio data read error:", err)
+			return fmt.Errorf("audio generation: %w", err)
 		}
 
 		tempAudioResponseFile, err := os.CreateTemp("", "persona-response-*.mp3")
 		if err != nil {
-			log.Fatal("Temporary audio file creation error:", err)
+			return fmt.Errorf("create temp audio file: %w", err)
 		}
-		defer os.Remove(tempAudioResponseFile.Name())
+		tempPath := tempAudioResponseFile.Name()
+		if err := tempAudioResponseFile.Close(); err != nil {
+			_ = os.Remove(tempPath)
+			return fmt.Errorf("close temp audio file: %w", err)
+		}
+		defer func() { _ = os.Remove(tempPath) }()
 
-		err = os.WriteFile(tempAudioResponseFile.Name(), audioBytes, 0o644)
-		if err != nil {
-			log.Fatal("Audio file write error:", err)
+		if err := os.WriteFile(tempPath, audioBytes, 0o600); err != nil {
+			return fmt.Errorf("write audio file: %w", err)
 		}
 
 		if askOutputFormat == "default" {
 			fmt.Println(ui.RenderInfo("🔈 Playing response..."))
 		}
-		err = speak.Play(tempAudioResponseFile.Name())
-		if err != nil {
-			log.Fatal("Response playback error:", err)
+		if err := speak.Play(tempPath); err != nil {
+			return fmt.Errorf("playback: %w", err)
 		}
 
 		if askOutputFormat == "default" {
 			fmt.Println(ui.RenderSuccess("Conversation completed!"))
 		}
+		return nil
 	},
 }
 

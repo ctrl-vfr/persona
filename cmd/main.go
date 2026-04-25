@@ -1,34 +1,28 @@
-// Package cmd contains the main command and subcommands
+// Package cmd wires the cobra command tree for the persona CLI.
+// All commands share access to a single *storage.Manager via the
+// package-level storageManager variable, which must be initialised
+// by main.go via Setup before Execute is called. This avoids the
+// previous init()-time side effect of creating ~/.persona on import,
+// which broke isolation in tests and prevented dependency injection.
 package cmd
 
 import (
-	"log"
-
 	"github.com/ctrl-vfr/persona/internal/storage"
 
 	"github.com/spf13/cobra"
 )
 
+// storageManager is the active storage manager shared by all commands.
+// It is set by Setup; reading it before Setup is called is a programmer
+// error and panics with a clear message.
 var storageManager *storage.Manager
 
-func init() {
-	// Initialize storage manager
-	manager, err := storage.NewManager()
-	if err != nil {
-		log.Fatal("Unable to initialize storage manager:", err)
-	}
-
-	storageManager = manager
-
-	// Initialize directory structure and default files
-	if err := storageManager.InitializeStructure(); err != nil {
-		log.Fatal("Unable to initialize structure:", err)
-	}
-}
-
-func init() {
-	// Only check for OPENAI_API_KEY when actually running commands that need it
-	// This allows tests and other commands to run without the API key
+// Setup wires the cmd package with a ready-to-use storage manager.
+// Call this exactly once from main before invoking the cobra command
+// tree. Tests can pass a manager pointing at a temporary directory to
+// run commands in isolation.
+func Setup(mgr *storage.Manager) {
+	storageManager = mgr
 }
 
 var rootCmd = &cobra.Command{
@@ -39,11 +33,8 @@ var rootCmd = &cobra.Command{
 • Chat with different AI personas
 • Manage conversation history
 • Provide a colorful and interactive interface`,
-	Run: func(cmd *cobra.Command, args []string) {
-		err := cmd.Help()
-		if err != nil {
-			log.Fatal(err)
-		}
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return cmd.Help()
 	},
 }
 

@@ -3,7 +3,6 @@ package cmd
 import (
 	"cmp"
 	"fmt"
-	"log"
 	"os"
 	"slices"
 
@@ -27,31 +26,29 @@ var readCmd = &cobra.Command{
 	Short: "Have a persona read a text file",
 	Long:  "Ask a persona to read aloud the content of a text file.",
 	Args:  cobra.ExactArgs(2),
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		personaName := args[0]
 		filePath := args[1]
+		ctx := cmd.Context()
 
 		if readOutputFormat == "default" {
 			terminalWidth := ui.GetTerminalWidth()
 			fmt.Println(ui.RenderChatBoxTitle(fmt.Sprintf("📖 Reading by %s", personaName), terminalWidth))
 		}
 
-		// Load persona
 		currentPersona, err := storageManager.GetPersona(personaName)
 		if err != nil {
-			log.Fatal("Error loading persona:", err)
+			return fmt.Errorf("load persona: %w", err)
 		}
 
-		// Load configuration
 		appConfig, err := storageManager.GetConfig()
 		if err != nil {
-			log.Fatal("Error loading configuration:", err)
+			return fmt.Errorf("load configuration: %w", err)
 		}
 
-		// Read file content
 		content, err := os.ReadFile(filePath)
 		if err != nil {
-			log.Fatal("Error reading file:", err)
+			return fmt.Errorf("read file: %w", err)
 		}
 
 		textContent := string(content)
@@ -60,79 +57,71 @@ var readCmd = &cobra.Command{
 			fmt.Println(ui.RenderUserMessage(textContent, terminalWidth, 0, true))
 		}
 
-		// NOTE: Initialize OpenAI client
-		aiClient := openai.New(os.Getenv("OPENAI_API_KEY"), appConfig.Models.Transcription, appConfig.Models.Speech, appConfig.Models.Chat, currentPersona.Voice.Name)
+		apiKey := os.Getenv("OPENAI_API_KEY")
+		if apiKey == "" {
+			return fmt.Errorf("OPENAI_API_KEY is not set")
+		}
+		aiClient := openai.New(apiKey, appConfig.Models.Transcription, appConfig.Models.Speech, appConfig.Models.Chat, currentPersona.Voice.Name)
 
-		// REVIEW: Split text into manageable chunks
+		// Split text into manageable chunks for parallel TTS generation.
 		if readOutputFormat == "default" {
 			fmt.Println(ui.RenderInfo("📄 Splitting text into chunks..."))
 		}
 		chunks := textsplit.SplitText(textContent)
 
 		if readOutputFormat == "default" {
-			fmt.Printf(ui.RenderInfo("🔊 Generating audio for %d chunks in parallel..."), len(chunks))
+			fmt.Println(ui.RenderInfo(fmt.Sprintf("🔊 Generating audio for %d chunks in parallel...", len(chunks))))
 		}
 
-		// TODO: Add configuration for TTS generator settings
-		// Create TTS generator with proper separation of concerns
 		ttsGenerator := audio.NewTTSGenerator(aiClient, currentPersona.Voice.Instructions, maxWorkers)
 
-		// Generate audio for all chunks in parallel
-		audioChunks, err := ttsGenerator.GenerateParallel(chunks)
+		audioChunks, err := ttsGenerator.GenerateParallel(ctx, chunks)
 		if err != nil {
-			log.Fatal("Parallel audio generation error:", err)
+			return fmt.Errorf("parallel audio generation: %w", err)
 		}
 
-		// OPTIMIZE: Filter successful chunks and handle errors
 		successfulChunks, failedErrors := audio.FilterSuccessfulChunks(audioChunks)
-
 		if len(failedErrors) > 0 {
-			log.Fatal("Some chunks failed to generate:\n" + fmt.Sprintf("%v", failedErrors))
+			audio.CleanupAudioChunks(successfulChunks)
+			return fmt.Errorf("some chunks failed to generate: %v", failedErrors)
 		}
+		defer audio.CleanupAudioChunks(successfulChunks)
 
-		// NOTE: Sort chunks by order for proper concatenation
+		// Sort by chunk order so concatenation produces the original text.
 		slices.SortFunc(successfulChunks, func(a, b audio.AudioChunk) int {
 			return cmp.Compare(a.Order, b.Order)
 		})
-
-		// Extract file paths for FFmpeg concatenation
 		audioFiles := audio.ExtractFilePaths(successfulChunks)
 
-		// Create final output file
 		tempAudioResponseFile, err := os.CreateTemp("", "persona-read-final-*.mp3")
 		if err != nil {
-			audio.CleanupAudioChunks(successfulChunks)
-			log.Fatal("Temporary audio file creation error:", err)
+			return fmt.Errorf("create temp audio file: %w", err)
 		}
+		tempPath := tempAudioResponseFile.Name()
+		if err := tempAudioResponseFile.Close(); err != nil {
+			_ = os.Remove(tempPath)
+			return fmt.Errorf("close temp audio file: %w", err)
+		}
+		defer func() { _ = os.Remove(tempPath) }()
 
 		if readOutputFormat == "default" {
 			fmt.Println(ui.RenderInfo("🔗 Concatenating audio files..."))
 		}
-
-		// WARNING: Use FFmpeg package for concatenation - proper separation of concerns
-		err = ffmpeg.ConcatenateAudioFiles(audioFiles, tempAudioResponseFile.Name())
-		if err != nil {
-			audio.CleanupAudioChunks(successfulChunks)
-			log.Fatal("Audio concatenation error:", err)
+		if err := ffmpeg.ConcatenateAudioFiles(audioFiles, tempPath); err != nil {
+			return fmt.Errorf("audio concatenation: %w", err)
 		}
-
-		defer audio.CleanupAudioChunks(successfulChunks)
 
 		if readOutputFormat == "default" {
 			fmt.Println(ui.RenderInfo("🔈 Reading text..."))
 		}
-		err = speak.Play(tempAudioResponseFile.Name())
-		if err != nil {
-			log.Fatal("Text reading error:", err)
+		if err := speak.Play(tempPath); err != nil {
+			return fmt.Errorf("playback: %w", err)
 		}
 
 		if readOutputFormat == "default" {
 			fmt.Println(ui.RenderSuccess("Reading completed!"))
 		}
-		err = os.Remove(tempAudioResponseFile.Name())
-		if err != nil {
-			log.Fatal("Temporary audio file removal error:", err)
-		}
+		return nil
 	},
 }
 

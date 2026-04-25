@@ -2,12 +2,55 @@ package persona
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
+
+// HistoryFileMode and PersonaFileMode mirror storage.UserFileMode.
+// Duplicated here to avoid an import cycle (storage imports persona).
+const (
+	HistoryFileMode os.FileMode = 0o600
+	PersonaFileMode os.FileMode = 0o600
+)
+
+// writeFileAtomic writes data atomically (tmp + rename in same dir).
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".tmp-"+filepath.Base(path)+"-*")
+	if err != nil {
+		return fmt.Errorf("create temp: %w", err)
+	}
+	tmpName := tmp.Name()
+	cleanup := func() {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		cleanup()
+		return fmt.Errorf("write temp: %w", err)
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		cleanup()
+		return fmt.Errorf("chmod temp: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		cleanup()
+		return fmt.Errorf("sync temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("close temp: %w", err)
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		_ = os.Remove(tmpName)
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
+}
 
 type Persona struct {
 	Name    string    `yaml:"name" json:"name"`
@@ -47,16 +90,11 @@ func (p *Persona) ClearHistory() {
 }
 
 func (p *Persona) SaveHistory(path string) error {
-	// Always save as YAML for better readability
 	data, err := yaml.Marshal(p.History)
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal history: %w", err)
 	}
-	err = os.WriteFile(path, data, 0644)
-	if err != nil {
-		return err
-	}
-	return nil
+	return writeFileAtomic(path, data, HistoryFileMode)
 }
 
 func (p *Persona) LoadHistory(path string) error {
@@ -85,16 +123,11 @@ func (p *Persona) LoadHistory(path string) error {
 }
 
 func (p *Persona) SavePersona(path string) error {
-	// Always save as YAML for better readability
 	data, err := yaml.Marshal(p)
 	if err != nil {
-		return err
+		return fmt.Errorf("marshal persona: %w", err)
 	}
-	err = os.WriteFile(path, data, 0644)
-	if err != nil {
-		return err
-	}
-	return nil
+	return writeFileAtomic(path, data, PersonaFileMode)
 }
 
 func (p *Persona) LoadPersona(path string) error {

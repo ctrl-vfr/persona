@@ -67,11 +67,11 @@ jobs:
         GOPROXY: "direct"
       run: go vet ./...
 
-    - name: Run tests with coverage
+    - name: Run tests (race detector + coverage)
       env:
         GOFLAGS: "-mod=mod"
         GOPROXY: "direct"
-      run: make test-cover
+      run: make ci-test
 
     - name: Check coverage threshold
       run: make coverage-check
