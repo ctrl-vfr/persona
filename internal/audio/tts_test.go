@@ -1,6 +1,7 @@
 package audio
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
@@ -149,7 +150,7 @@ func TestGenerateParallelWithMockData(t *testing.T) {
 	tts := NewTTSGenerator(nil, "test", 3)
 
 	emptyChunks := []textsplit.TextChunk{}
-	_, err := tts.GenerateParallel(emptyChunks)
+	_, err := tts.GenerateParallel(context.Background(), emptyChunks)
 
 	if err == nil {
 		t.Error("Expected error for empty chunks")
