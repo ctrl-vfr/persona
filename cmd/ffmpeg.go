@@ -57,7 +57,7 @@ var ffmpegListInputCmd = &cobra.Command{
 		// Default: full formatted output
 		if len(audioDevicesList) == 0 {
 			fmt.Println(ui.TitleStyle.Render("No audio devices found."))
-			fmt.Println(ui.ContentStyle.Render("You can list available audio devices with the `ffmpeg list devices` command."))
+			fmt.Println(ui.ContentStyle.Render("Check that ffmpeg is installed and that the input format for your OS is supported (dshow on Windows, avfoundation on macOS, alsa on Linux)."))
 			fmt.Println()
 			return
 		}

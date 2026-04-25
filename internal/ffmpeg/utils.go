@@ -8,14 +8,23 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 )
 
-// listAudioDevices returns a list of available audio devices (input or output)
+// ListAudioDevices returns the audio input devices ffmpeg can see on
+// the current host. Output is parsed from ffmpeg's stderr because that
+// is where it prints device enumeration; the command itself always
+// exits non-zero (it's a "no actual input" call).
+//
+// The parser is platform-specific because each input format prints
+// devices in its own format:
+//   - dshow (Windows):       [dshow @ ...]  "Microphone (Realtek)"
+//   - avfoundation (macOS):  [AVFoundation indev @ ...] [0] MacBook Pro Microphone
+//   - alsa (Linux):          ffmpeg -list_devices is not supported.
 func ListAudioDevices() ([]string, error) {
-	cmd := exec.Command("ffmpeg.exe", "-list_devices", "true", "-f", "dshow", "-i", "dummy")
+	cmd := exec.Command(ffmpegBinary(), "-list_devices", "true", "-f", inputFormat(), "-i", "")
 
-	// ffmpeg writes device list to stderr
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
@@ -25,113 +34,138 @@ func ListAudioDevices() ([]string, error) {
 		return nil, fmt.Errorf("failed to start ffmpeg: %w", err)
 	}
 
-	var devices []string
-	scanner := bufio.NewScanner(stderr)
+	devices, stderrText := parseDevices(stderr, runtime.GOOS)
 
-	// Updated regex to match device lines - ffmpeg outputs device names in quotes
-	deviceRegex := regexp.MustCompile(`"([^"]+)"\s+\(audio\)`)
-
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		// Look for device names with the specified type
-		matches := deviceRegex.FindStringSubmatch(line)
-		if len(matches) > 1 {
-			deviceName := strings.TrimSpace(matches[1])
-			if deviceName != "" {
-				devices = append(devices, deviceName)
-			}
+	// Always Wait to reap the process. ffmpeg exits non-zero here.
+	if err := cmd.Wait(); err != nil && len(devices) == 0 {
+		if strings.Contains(stderrText, "Unknown input format") || strings.Contains(stderrText, "No such file or directory") {
+			return nil, fmt.Errorf("ffmpeg device listing failed: %w\nFFmpeg stderr output:\n%s", err, stderrText)
 		}
-	}
-
-	// Wait for command to finish (it will error out, which is expected)
-	err = cmd.Wait()
-	if err != nil {
-		return nil, fmt.Errorf("ffmpeg process failed: %w", err)
 	}
 
 	return devices, nil
 }
 
-// ConcatenateAudioFiles combines multiple audio files using FFmpeg
+// parseDevices reads ffmpeg's stderr stream and extracts audio input
+// device names according to the host OS output format. Returns the
+// device list and the raw stderr (for error reporting upstream).
+func parseDevices(r io.Reader, goos string) ([]string, string) {
+	var (
+		devices   []string
+		raw       strings.Builder
+		scanner   = bufio.NewScanner(r)
+		dshowRe   = regexp.MustCompile(`"([^"]+)"`)
+		avfoundRe = regexp.MustCompile(`\[\d+\]\s+(.+)$`)
+		// avfoundation prints "AVFoundation video devices:" then
+		// "AVFoundation audio devices:". We only collect lines after
+		// the audio header.
+		inAudioSection bool
+	)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		raw.WriteString(line)
+		raw.WriteString("\n")
+
+		switch goos {
+		case "windows":
+			if strings.Contains(line, "(audio)") {
+				if m := dshowRe.FindStringSubmatch(line); len(m) > 1 {
+					if name := strings.TrimSpace(m[1]); name != "" {
+						devices = append(devices, name)
+					}
+				}
+			}
+		case "darwin":
+			lower := strings.ToLower(line)
+			if strings.Contains(lower, "avfoundation audio devices") {
+				inAudioSection = true
+				continue
+			}
+			if strings.Contains(lower, "avfoundation video devices") {
+				inAudioSection = false
+				continue
+			}
+			if !inAudioSection {
+				continue
+			}
+			if m := avfoundRe.FindStringSubmatch(line); len(m) > 1 {
+				if name := strings.TrimSpace(m[1]); name != "" {
+					devices = append(devices, name)
+				}
+			}
+		}
+	}
+	return devices, raw.String()
+}
+
+// ConcatenateAudioFiles combines multiple audio files using FFmpeg's
+// concat demuxer.
 func ConcatenateAudioFiles(inputFiles []string, outputFile string) error {
 	if len(inputFiles) == 0 {
 		return fmt.Errorf("no input files provided")
 	}
-
-	// OPTIMIZE: Single file case - just copy instead of using FFmpeg
 	if len(inputFiles) == 1 {
 		return copyFile(inputFiles[0], outputFile)
 	}
 
-	// NOTE: Create a file list for FFmpeg concat demuxer
 	listFile, err := os.CreateTemp("", "ffmpeg-concat-*.txt")
 	if err != nil {
 		return fmt.Errorf("failed to create concat list file: %w", err)
 	}
-	defer os.Remove(listFile.Name()) // FIXME: Ensure cleanup
+	defer func() { _ = os.Remove(listFile.Name()) }()
 
-	// Write file list in FFmpeg concat format
 	var content strings.Builder
 	for _, file := range inputFiles {
 		absPath, err := filepath.Abs(file)
 		if err != nil {
 			return fmt.Errorf("failed to get absolute path for %s: %w", file, err)
 		}
-		// WARNING: Escape single quotes for FFmpeg safety
+		// Escape single quotes for FFmpeg's concat list format.
 		escapedPath := strings.ReplaceAll(absPath, "'", "'\"'\"'")
 		fmt.Fprintf(&content, "file '%s'\n", escapedPath)
 	}
 
-	err = os.WriteFile(listFile.Name(), []byte(content.String()), 0644)
-	if err != nil {
+	if err := os.WriteFile(listFile.Name(), []byte(content.String()), 0o600); err != nil {
 		return fmt.Errorf("failed to write concat list: %w", err)
 	}
 
-	// Use FFmpeg concat demuxer for efficient concatenation
 	return runFFmpegConcat(listFile.Name(), outputFile)
 }
 
-// copyFile copies a single file when concatenation isn't needed
+// copyFile copies a single file when concatenation isn't needed.
 func copyFile(src, dst string) error {
-	// NOTE: Simple file copy for single-file case
 	source, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("failed to open source file: %w", err)
 	}
-	defer source.Close()
+	defer func() { _ = source.Close() }()
 
 	destination, err := os.Create(dst)
 	if err != nil {
 		return fmt.Errorf("failed to create destination file: %w", err)
 	}
-	defer destination.Close()
+	defer func() { _ = destination.Close() }()
 
-	_, err = io.Copy(destination, source)
-	if err != nil {
+	if _, err := io.Copy(destination, source); err != nil {
 		return fmt.Errorf("failed to copy file content: %w", err)
 	}
-
 	return nil
 }
 
-// runFFmpegConcat executes FFmpeg to concatenate audio files
+// runFFmpegConcat executes FFmpeg to concatenate audio files.
 func runFFmpegConcat(listFile, outputFile string) error {
 	cmd := exec.Command(
-		"ffmpeg.exe",
-		"-f", "concat", // Use concat demuxer
-		"-safe", "0", // Allow unsafe file paths
-		"-i", listFile, // Input file list
-		"-c", "copy", // Copy streams without re-encoding
-		"-y", // Overwrite output file
+		ffmpegBinary(),
+		"-f", "concat",
+		"-safe", "0",
+		"-i", listFile,
+		"-c", "copy",
+		"-y",
 		outputFile,
 	)
-
-	// REVIEW: Consider capturing stderr for better error reporting
-	err := cmd.Run()
-	if err != nil {
+	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("FFmpeg concatenation failed: %w", err)
 	}
-
 	return nil
 }
