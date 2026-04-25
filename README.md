@@ -4,6 +4,10 @@
 
 Salut ! 👋 **Persona** est votre nouveau compagnon vocal intelligent qui transforme votre terminal en un espace de conversation magique ! Imaginez pouvoir discuter avec Marceline (la vampire rebelle d'Adventure Time), Freud, ou même créer votre propre personnage IA unique. C'est exactement ce que Persona vous offre ! 🚀
 
+À la base, Persona est né d'une envie toute simple : avoir un assistant vocal léger à inviter dans les **discussions Discord avec les copains**. Un truc à lancer en arrière-plan d'un afterwork ou d'une session de jeu, qui répond en vrai temps, avec une personnalité..
+
+Pas de setup compliqué, pas d'usine à gaz : un binaire, une clé OpenAI, un micro, et c'est parti.
+
 ## ✨ Pourquoi vous allez adorer Persona
 
 ![Features Overview](./docs/images/default-help-output.png)
@@ -27,12 +31,10 @@ Bon, on va pas se mentir, il faut installer quelques trucs avant de pouvoir caus
 
 1. **Go 1.24.0 ou plus récent** (le langage de programmation, pas le jeu !)
 
-   ```bash
-   # Vérifiez si vous l'avez déjà
-   go version
-   ```
-
-   > Pas de Go ? Pas de souci ! Téléchargez-le sur [golang.org](https://golang.org/dl/)
+```bash
+# Vérifiez si vous l'avez déjà
+go version
+```
 
 2. **FFmpeg** (le couteau suisse de l'audio/vidéo)
 
@@ -48,18 +50,35 @@ Bon, on va pas se mentir, il faut installer quelques trucs avant de pouvoir caus
 
    **Autres systèmes :**
 
-   ```bash
-   # macOS (avec Homebrew)
-   brew install ffmpeg
+```bash
+# macOS (avec Homebrew)
+brew install ffmpeg
 
-   # Ubuntu/Debian
-   sudo apt update && sudo apt install ffmpeg
-   ```
+# Ubuntu/Debian
+sudo apt update && sudo apt install ffmpeg
+```
 
 3. **Clé API OpenAI**
-   - Créer un compte sur [OpenAI](https://platform.openai.com/)
-   - Générer une clé API dans les paramètres
-   - Configurer la variable d'environnement `OPENAI_API_KEY`
+- Créer un compte sur [OpenAI](https://platform.openai.com/)
+- Générer une clé API dans les paramètres
+- Configurer la variable d'environnement `OPENAI_API_KEY`
+
+4. **Une Nerd Font dans votre terminal** (pour que les icônes du TUI s'affichent)
+
+   L'interface utilise des glyphes [Nerd Fonts](https://www.nerdfonts.com/) (chevrons Powerline, micro, robot, baguette magique...). Sans Nerd Font, vous verrez des carrés vides ou des `?` à la place des icônes.
+
+   ```bash
+   # macOS (avec Homebrew)
+   brew install --cask font-jetbrains-mono-nerd-font
+   # ou: font-fira-code-nerd-font, font-hack-nerd-font, etc.
+
+   # Linux : télécharger depuis https://github.com/ryanoasis/nerd-fonts/releases
+   # et placer les .ttf dans ~/.local/share/fonts/, puis fc-cache -fv
+
+   # Windows : télécharger l'archive depuis nerdfonts.com et installer les .ttf
+   ```
+
+   Ensuite, configurez votre terminal (iTerm2, Ghostty, Wezterm, Windows Terminal...) pour utiliser cette police.
 
 ### Variables d'environnement
 
@@ -277,7 +296,7 @@ C:\path\to\persona.exe chat marceline
 
 # Demander quelque chose à Freud
 # Après une seconde de silence, le processus enverra le contenu automaiquement et freud vous répondra (attention il est chelou lui)
-C:\path\to\persona.exe ask freud "Analyze my streaming setup"
+C:\path\to\persona.exe ask freud
 
 # Lire un script avec votre persona préféré
 C:\path\to\persona.exe read coach "C:\Scripts\motivation.txt"
@@ -329,7 +348,7 @@ Pas de panique ! Même les meilleurs ont parfois des petits pépins. Voici comme
 
 ### Problèmes courants (et leurs solutions magiques ✨)
 
-**1. "OPENAI_API_KEY non définie" (le classique !)**
+**1. "OPENAI_API_KEY non définie" **
 
 ```bash
 # Vérifier la variable d'environnement
@@ -356,10 +375,21 @@ ffmpeg -f avfoundation -list_devices true -i ""  # macOS
 - Agrandir la taille du terminal (minimum 80x24)
 - Utiliser un terminal moderne supportant les couleurs
 
+**4. Carrés vides, `?` ou tofu à la place des icônes**
+
+Le TUI utilise des [Nerd Fonts](https://www.nerdfonts.com/) pour les chevrons Powerline et les glyphes des personas/statuts. Si votre police de terminal n'en est pas une "Nerd Fonts", les icônes ne s'affichent pas.
+
+- Installez une Nerd Font (cf. section [Prérequis](#ce-dont-vous-avez-besoin), point 4)
+- Configurez votre terminal pour l'utiliser (réglages → police)
+
+## 🤝 Développement assisté par IA
+
+Ce projet est codé main dans la main avec [Claude Code](https://claude.com/claude-code)
+
 ## 📄 Licence
 
-Ce projet est sous licence MIT - en gros, faites-en ce que vous voulez, mais gardez les crédits ! 😉
-Voir le fichier [LICENSE](LICENSE) pour les détails juridiques ennuyeux.
+Ce projet est sous licence MIT
+Voir le fichier [LICENSE](LICENSE)
 
 ## 🙏 Remerciements (les vrais MVP !)
 
@@ -367,6 +397,7 @@ Voir le fichier [LICENSE](LICENSE) pour les détails juridiques ennuyeux.
 - 🤖 [OpenAI](https://openai.com/) - Pour les cerveaux de nos personas
 - 🎵 [FFmpeg](https://ffmpeg.org/) - Le magicien de l'audio depuis toujours
 - 🐍 [Cobra](https://github.com/spf13/cobra) - Pour une CLI qui claque
+- 🧠 [Claude Code](https://claude.com/claude-code) - Pour avoir transformé du temps de codage en temps de dégustation de café
 
 ---
 
