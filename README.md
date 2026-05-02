@@ -126,7 +126,7 @@ chmod +x persona-vX.X.X-darwin-amd64
 
 ```bash
 # Installer directement avec Go
-go install https://github.com/ctrl-vfr/persona@latest
+go install github.com/ctrl-vfr/persona@latest
 
 # Vérifier l'installation
 persona --help
